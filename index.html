@@ -557,7 +557,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v18.11 00:15';
+const APP_V='v18.11 00:20';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -694,6 +694,12 @@ function setMem(rows){
 }
 // Emplacements connus d'un article lors des inventaires PRÉCÉDENTS (hors inventaire en cours)
 function known(ean,invId){ return (MEM.get(ean)||[]).filter(m=>m.inv!==invId); }
+function fmtDim(d){
+  const s=String(d??'').trim(); if(!s) return '';
+  const m=s.match(/^(\d{3})(\d{2})(\d{2})$/); if(m) return `${m[1]}/${m[2]} R${m[3]}`;
+  return s;
+}
+const dimTxt=a=>{ const f=fmtDim(a&&a.dimension); return f?'Dim. <b>'+esc(f)+'</b>':''; };
 const lieu=(z,r)=>(z||'?')+(r?' · rack '+r:'');
 const dshort=t=>new Date(t).toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'});
 function knownTxt(list){ return list.map(m=>`${m.depot}${m.racks?' · rack '+m.racks:''} (${fmt(m.qte)} · ${dshort(m.vu)})`).join(', '); }
@@ -936,7 +942,7 @@ function renderRecList(){
     const head = x.t ? 'Dans l\'ordre du 1er comptage (plus ancien en haut)' : 'Jamais comptés (stock attendu)';
     const hd = head!==lastHead ? `<div class="small" style="margin:8px 0 2px;font-weight:800;color:${x.t?'#7a5b00':'#7b3fe4'}">${esc(head)}</div>` : ''; lastHead=head;
     return hd+`<div class="it ${x.t?'':'notcounted'}" onclick="openArt('${esc(x.a.ean)}')"><span class="brandsm">${brandHtml(brandOf(x.a))}</span>
-      <div class="t"><div><b>${esc(x.a.designation)}</b></div><div class="muted">${x.t?'<b>'+hms(x.t)+'</b> · ':''}${esc(x.depot?lieu(x.depot,x.rack):'emplacement inconnu')}${x.a.reference?' · Réf. '+esc(x.a.reference):''}</div></div>
+      <div class="t"><div><b>${esc(x.a.designation)}</b></div><div class="muted">${x.t?'<b>'+hms(x.t)+'</b> · ':''}${esc(x.depot?lieu(x.depot,x.rack):'emplacement inconnu')}${fmtDim(x.a.dimension)?' · <b>'+esc(fmtDim(x.a.dimension))+'</b>':''}${x.a.reference?' · Réf. '+esc(x.a.reference):''}</div></div>
       <span class="pill ${x.t?'warn':'test'}">${x.t?'à recompter':'non compté'}</span></div>`; }).join('')
     : `<div class="muted" style="padding:8px 0">Tout est recompté 👍 (${done})</div>`;
 }
@@ -1005,7 +1011,7 @@ function searchArt(){
   const q=$('q').value; const box=$('res');
   if(q.trim().length<2){box.innerHTML='';return;}
   const all=S.arts.filter(a=>matchArt(a,q)), r=all.slice(0,50);
-  box.innerHTML = (all.length>r.length?`<div class="muted small" style="padding:4px 0">${all.length} résultats — affinez la recherche</div>`:'') + (r.length? r.map(a=>`<div class="it" onclick="openArt('${esc(a.ean)}')"><span class="brandsm">${brandHtml(brandOf(a))}</span><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${esc(a.ean)}${a.reference?' · '+esc(a.reference):''}</div></div>${$('recMode').checked?'':`<span class="pill">stock ${fmt(a.qte_theorique)}</span>`}</div>`).join('') : '<div class="muted" style="padding:8px 0">Aucun résultat</div>');
+  box.innerHTML = (all.length>r.length?`<div class="muted small" style="padding:4px 0">${all.length} résultats — affinez la recherche</div>`:'') + (r.length? r.map(a=>`<div class="it" onclick="openArt('${esc(a.ean)}')"><span class="brandsm">${brandHtml(brandOf(a))}</span><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${[fmtDim(a.dimension)?'<b>'+esc(fmtDim(a.dimension))+'</b>':'', a.reference?'Réf. '+esc(a.reference):'', esc(a.ean)].filter(Boolean).join(' · ')}</div></div>${$('recMode').checked?'':`<span class="pill">stock ${fmt(a.qte_theorique)}</span>`}</div>`).join('') : '<div class="muted" style="padding:8px 0">Aucun résultat</div>');
 }
 
 /* scan : moteur ZXing-C++ (WebAssembly) via l'API BarcodeDetector — bien plus fiable que l'ancien moteur sur les EAN */
@@ -1271,7 +1277,7 @@ function openArt(ean){
   $('aLogo').innerHTML = brandHtml(brandOf(a));
   $('aCode').textContent = ean;
   $('aName').textContent = a? a.designation : 'Code non référencé dans le fichier';
-  $('aMeta').innerHTML = (a&&a.reference?'Réf. <b>'+esc(a.reference)+'</b> · ':'')+'EAN '+esc(ean);
+  $('aMeta').innerHTML = [a&&a.reference?'Réf. <b>'+esc(a.reference)+'</b>':'', dimTxt(a), 'EAN '+esc(ean)].filter(Boolean).join(' · ');
   $('newArt').classList.toggle('hidden',!!a); hide('editArt');
   $('btnEditArt').classList.toggle('hidden',!a || !isAdmin()); if(!a){$('naDes').value='';$('naStock').value=0;$('naPrix').value='';}
   $('aInfo').innerHTML = (a&&a.hors_feuille?'<span class="pill horsp">📦 Hors feuille — à régulariser</span> ':'');
@@ -1300,7 +1306,7 @@ function showCatHit(c){
   $('artCard').classList.remove('unk'); $('artCard').classList.add('horsf');
   $('aLogo').innerHTML=brandHtml(brandOf(c));
   $('aName').textContent=c.designation||'(sans libellé)';
-  $('aMeta').innerHTML=(c.reference?'Réf. <b>'+esc(c.reference)+'</b> · ':'')+'EAN '+esc(c.ean);
+  $('aMeta').innerHTML=[c.reference?'Réf. <b>'+esc(c.reference)+'</b>':'', dimTxt(c), 'EAN '+esc(c.ean)].filter(Boolean).join(' · ');
   $('aInfo').innerHTML='<div class="dupw" style="background:#ffe8d6;border-color:#f0a76a;color:#7a3b00"><b>📦 Hors feuille</b> : ce pneu n\'est pas dans le fichier de cet inventaire. Trouvé dans la base articles : il sera ajouté en fin d\'inventaire <b>pour régularisation</b>.</div>';
   hide('newArt');
 }
@@ -1776,7 +1782,7 @@ function finderSearch(){
   const k=keyEan(q);
   const all=CAT.filter(a=>a.ean===k || matchArt(a,q)), r=all.slice(0,50);
   $('fdRes').innerHTML = `<div class="muted small" style="padding:4px 0">${all.length} article(s) trouvé(s)${all.length>r.length?' — 50 premiers affichés, affinez':''}</div>` + (r.length ? r.map(a=>{ const kn=MEM.get(a.ean)||[];
-    return `<div class="it" onclick="finderDetail('${esc(a.ean)}')"><span class="brandsm">${brandHtml(brandOf(a))}</span><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${esc(a.ean)}</div></div>${kn.length?`<span class="pill warn">📍 ${esc(kn[0].depot)}</span>`:'<span class="pill">jamais compté</span>'}</div>`; }).join('')
+    return `<div class="it" onclick="finderDetail('${esc(a.ean)}')"><span class="brandsm">${brandHtml(brandOf(a))}</span><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${fmtDim(a.dimension)?'<b>'+esc(fmtDim(a.dimension))+'</b> · ':''}${esc(a.ean)}</div></div>${kn.length?`<span class="pill warn">📍 ${esc(kn[0].depot)}</span>`:'<span class="pill">jamais compté</span>'}</div>`; }).join('')
     : '<div class="muted" style="padding:8px 0">Aucun article trouvé</div>');
   if(r.length===1) finderDetail(r[0].ean);
 }
@@ -1790,7 +1796,7 @@ async function finderDetail(ean){
   $('fdDet').innerHTML = `<div class="card art" style="margin:0">
     <div class="brandbig">${brandHtml(brandOf(a))}</div>
     <h3 style="margin:0 0 4px">${esc(a.designation)}</h3>
-    <div class="small muted">EAN ${esc(ean)}${a.reference?' · réf. '+esc(a.reference):''}</div>
+    <div class="small muted">${[a.reference?'Réf. '+esc(a.reference):'', fmtDim(a.dimension)?'Dim. '+esc(fmtDim(a.dimension)):'', 'EAN '+esc(ean)].filter(Boolean).join(' · ')}</div>
     <div style="margin:12px 0 6px"><b>📍 Dernier emplacement connu</b></div>
     ${kn.length ? kn.map((m,i)=>`<div class="small" style="padding:3px 0">${i===0?'<span class="pill warn">le plus récent</span> ':''}<b>${esc(m.depot)}${m.racks?' · rack '+esc(m.racks):''}</b> — ${fmt(m.qte)} pneu(s) le ${dshort(m.vu)} <span class="muted">(${esc(invName(m.inv))})</span></div>`).join('') : '<div class="small muted">Jamais compté dans un inventaire.</div>'}
     <div style="margin:14px 0 6px"><b>🕘 Historique des comptages</b> <span class="muted small">(${data.length})</span></div>
