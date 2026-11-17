@@ -253,6 +253,7 @@ body.noadmin #toast{bottom:24px!important}
       </div>
       <span class="pill bad hidden" id="cPend"></span>
       <span style="flex:1"></span>
+      <button class="btn sm" id="btnRec" onclick="toggleRecMode()">🔁 Recomptage</button>
       <button class="btn sm" onclick="toggleExpected()">📋 Attendus dans ce dépôt</button>
     </div>
     <div id="expBox" class="card hidden" style="padding:12px 14px">
@@ -263,10 +264,10 @@ body.noadmin #toast{bottom:24px!important}
     <div class="hidden"><b id="cInv"></b><span id="cFast"></span><span id="cRec"></span>
       <input type="checkbox" id="fast"><input type="checkbox" id="recMode"><button id="optSim"></button></div>
 
-    <div id="recBox" class="card hidden" style="border:2px solid var(--warn)">
-      <b>🔁 À recompter</b> <span class="muted small" id="recN"></span>
-      <div class="small muted">Ces articles sont à recompter : la prochaine saisie de chacun compte comme recomptage.</div>
-      <div class="list small" id="recList"></div>
+    <div id="recBox" class="card hidden" style="border:3px solid var(--warn);background:#fffaf0">
+      <div class="row"><b style="font-size:17px">🔁 MODE RECOMPTAGE</b><span class="small" id="recN" style="text-align:right"></span></div>
+      <div class="small muted" style="margin:4px 0 8px">Articles en écart (compté ≠ stock), classés par rack puis par libellé. Chaque saisie remplace le premier comptage.</div>
+      <div class="list small res" id="recList" style="max-height:340px"></div>
     </div>
 
     <div id="reader"></div>
@@ -534,7 +535,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 22:15';
+const APP_V='v17.11 22:30';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -693,7 +694,7 @@ function fillRefSelects(st={}){
 $('sPin').addEventListener('keydown',e=>{if(e.key==='Enter')startCount()});
 function switchDepot(z){
   if(!z) return; S.zone=z; S.rack=''; const st=LS.get('setup',{}); st.zone=z; st.rack=''; LS.set('setup',st);
-  fillRacks(); toast('Dépôt : '+z,'ok'); if(S.cur) renderDup(S.cur);
+  fillRacks(); toast('Dépôt : '+z,'ok'); if(S.cur) renderDup(S.cur); if($('recMode').checked) renderRecList();
   if(!$('expBox').classList.contains('hidden')) showExpected();
 }
 // Racks du dépôt courant : liste facultative, masquée si le dépôt n'en a pas
@@ -724,7 +725,7 @@ async function startCount(silent){
   $('sPin').value='';
   setTimeout(updateInvStrip,0);
   const rack0 = st0.zone===zone ? (st0.rack||'') : '';
-  LS.set('setup',{inv,who,zone,rack:rack0,active:true});
+  LS.set('setup',{inv,who,zone,rack:rack0,active:true,rec:!!st0.rec&&st0.inv===inv});
   S.inv=inv; S.who=who; S.zone=zone; S.rack=rack0;
   $('cInv').textContent=((S.invs||[]).find(i=>i.id===inv)||{}).nom||$('sInv').selectedOptions[0].text;
   { const iv=(S.invs||[]).find(i=>i.id===inv)||{nom:$('sInv').selectedOptions[0].text}, nm=iv.nom, test=/test/i.test(nm);
@@ -734,7 +735,8 @@ async function startCount(silent){
   hide('setup'); show('counting');
   loadLogos();
   await loadArts(); await loadMine(); subscribeArts();
-  loadAllCounts(); loadMem();
+  await loadAllCounts(); loadMem();
+  toggleRecMode(!!LS.get('setup',{}).rec);
 }
 
 /* ---- contrôle des doublons en direct ---- */
@@ -750,6 +752,7 @@ async function loadAllCounts(){
     else if(p.eventType==='DELETE'){ S.allC=S.allC.filter(c=>c.id!==p.old.id); }
     else if(p.eventType==='UPDATE'){ S.allC=S.allC.map(c=>c.id===p.new.id?p.new:c); }
     if(S.cur) renderDup(S.cur);
+    if($('recMode').checked) renderRecList();
   }).subscribe();
 }
 function dupInfo(ean){
@@ -820,12 +823,53 @@ function subscribeArts(){
     const a=S.byEan.get(p.new.ean); if(a){a.a_recompter=p.new.a_recompter; renderRecList();}
   }).subscribe();
 }
-function isRec(ean){ return $('recMode').checked || !!(S.byEan.get(ean)||{}).a_recompter; }
+// Mode recomptage : toutes les saisies faites dans ce mode sont des recomptages
+function isRec(ean){ return $('recMode').checked; }
+function toggleRecMode(force){
+  const on = typeof force==='boolean' ? force : !$('recMode').checked;
+  $('recMode').checked=on;
+  const st=LS.get('setup',{}); st.rec=on; LS.set('setup',st);
+  $('btnRec').classList.toggle('dark',on); $('btnRec').textContent=on?'🔁 Recomptage : ACTIF':'🔁 Recomptage';
+  renderRecList(); if(S.cur) renderDup(S.cur);
+  if(typeof force!=='boolean') toast(on?'Mode recomptage activé':'Retour au comptage normal', on?'bad':'ok');
+}
+// Liste des écarts : compté (1er comptage) ≠ stock, y compris jamais compté avec du stock
+function recItems(){
+  const first={}, rec={}, loc={};
+  S.allC.concat(Q.filter(c=>c.inventaire_id===S.inv)).forEach(c=>{
+    const q=Number(c.qte);
+    if(c.recomptage) rec[c.ean]=(rec[c.ean]||0)+q; else first[c.ean]=(first[c.ean]||0)+q;
+    (loc[c.ean]=loc[c.ean]||new Set()).add(JSON.stringify([c.zone||'',c.rack||'']));
+  });
+  return S.arts.map(a=>{
+    const theo=Number(a.qte_theorique)||0, c1=first[a.ean]||0, counted=a.ean in first;
+    if(c1===theo && counted) return null;      // pas d'écart
+    if(!counted && theo<=0) return null;      // rien en stock, jamais compté : pas d'écart
+    let places=[...(loc[a.ean]||[])].map(s=>JSON.parse(s));
+    if(!places.length){ const k=known(a.ean,S.inv)[0]; if(k) places=[[k.depot,(k.racks||'').split(',')[0].trim()]]; }
+    places.sort((x,y)=>(x[0]===S.zone?-1:0)-(y[0]===S.zone?-1:0));
+    const p=places[0]||['',''];
+    return {a, theo, c1, counted, done: a.ean in rec, rc: rec[a.ean], depot:p[0], rack:p[1]};
+  }).filter(Boolean).sort((x,y)=>
+    (x.done-y.done) ||
+    ((x.depot===S.zone?0:x.depot?1:2)-(y.depot===S.zone?0:y.depot?1:2)) ||
+    String(x.depot).localeCompare(String(y.depot),'fr') ||
+    ((x.rack?0:1)-(y.rack?0:1)) || String(x.rack).localeCompare(String(y.rack),'fr',{numeric:true}) ||
+    String(x.a.designation).localeCompare(String(y.a.designation),'fr'));
+}
 function renderRecList(){
-  const rec=S.arts.filter(a=>a.a_recompter);
-  $('recBox').classList.toggle('hidden',!rec.length);
-  $('recN').textContent = rec.length? `(${rec.length})`:'— rien à recompter';
-  $('recList').innerHTML = rec.map(a=>`<div class="it" onclick="openArt('${esc(a.ean)}')"><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${esc(a.ean)}</div></div><span class="pill warn">recompter</span></div>`).join('');
+  const on=$('recMode').checked; $('recBox').classList.toggle('hidden',!on); if(!on) return;
+  const it=recItems(), left=it.filter(x=>!x.done).length;
+  $('recN').innerHTML = `<b>${left}</b> à recompter · ${it.length-left} fait(s)`;
+  let lastHead='';
+  $('recList').innerHTML = it.length ? it.map(x=>{
+    const head = x.done ? '✓ Déjà recomptés' : x.depot ? lieu(x.depot,x.rack) : 'Emplacement inconnu';
+    const h = head!==lastHead ? `<div class="small" style="margin:8px 0 2px;font-weight:800;color:#7a5b00">${esc(head)}</div>` : ''; lastHead=head;
+    const ec = x.c1-x.theo;
+    return h+`<div class="it" style="${x.done?'opacity:.55':''}" onclick="openArt('${esc(x.a.ean)}')"><span class="brandsm">${brandHtml(brandOf(x.a))}</span>
+      <div class="t"><div><b>${esc(x.a.designation)}</b></div><div class="muted">${x.a.reference?'Réf. '+esc(x.a.reference)+' · ':''}stock ${fmt(x.theo)} · compté ${x.counted?fmt(x.c1):'—'}${x.done?' · recompté '+fmt(x.rc):''}</div></div>
+      <span class="pill ${x.done?'ok':ec<0?'bad':'warn'}">${x.done?'✓':(ec>0?'+':'')+fmt(ec)}</span></div>`; }).join('')
+    : '<div class="muted" style="padding:8px 0">Aucun écart 👍</div>';
 }
 async function loadMine(){
   const {data} = await sb.from('comptages').select('*').eq('inventaire_id',S.inv).eq('compteur',S.who).order('created_at',{ascending:false}).limit(30);
@@ -1214,6 +1258,7 @@ function addCount(ean,qte){
   const rec = isRec(ean);
   Q.push({inventaire_id:S.inv,ean,qte,zone:S.zone,rack:S.rack||null,compteur:S.who,recomptage:rec,created_at:new Date().toISOString()});
   LS.set('queue',Q); renderMine(); netState(); flushQueue();
+  if($('recMode').checked) renderRecList();
 }
 let flushing=false;
 async function flushQueue(){
