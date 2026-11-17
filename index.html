@@ -143,6 +143,8 @@ body.noadmin #toast{bottom:24px!important}
 .opbar .invpill.test{background:#7b3fe4}
 #vBureau .toolbar{row-gap:8px}
 @media (max-width:700px){header.top{padding:8px 12px} #vBureau .toolbar .btn{padding:8px 10px;font-size:13px} .kpi .v{font-size:20px}}
+.dupred{background:#fde3e1!important;border:2px solid var(--bad)!important;color:#7a1d16!important;font-size:14px}
+#saveChoice .btn small{font-weight:600;opacity:.85;font-size:12px}
 .dupw{background:#fdf0d5;border:1px solid #f0cf86;color:#7a4a00;border-radius:10px;padding:10px 12px;margin-bottom:6px}
 .brandbig{margin-bottom:8px;min-height:0}
 .brandbig img{max-height:48px;max-width:180px;object-fit:contain;display:block}
@@ -536,7 +538,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 23:30';
+const APP_V='v17.11 23:40';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -781,12 +783,24 @@ function prevCounts(ean){
 }
 // « au même endroit » = même dépôt, et même rack si un rack est choisi
 const samePlace=c=>c.zone===S.zone && (!S.rack || (c.rack||'')===S.rack);
+function replaceTargets(prev){
+  let t=prev.filter(samePlace); if(t.length) return t;
+  t=prev.filter(c=>c.zone===S.zone); if(t.length) return t;
+  return prev;
+}
+function updateSaveLabels(){
+  if(!S.cur) return; const prev=prevCounts(S.cur); if(!prev.length) return;
+  const q=+$('aQty').value||0, tot=prev.reduce((s,c)=>s+Number(c.qte),0), tg=replaceTargets(prev), tq=tg.reduce((s,c)=>s+Number(c.qte),0);
+  const where=[...new Set(tg.map(c=>lieu(c.zone,c.rack)))].join(', ');
+  $('btnAdd').innerHTML=`➕ Ajouter<br><small>total ${fmt(tot+q)}</small>`;
+  $('btnReplace').innerHTML=`♻️ Remplacer ${fmt(tq)}<br><small>${esc(where)} → total ${fmt(tot-tq+q)}</small>`;
+}
 function renderDup(ean){
   const out=[], rec=isRec(ean), prev=prevCounts(ean), here=prev.filter(samePlace);
   if(prev.length){
-    out.push(`<div class="dupw"><b>⚠ Déjà ${rec?'recompté':'compté'} :</b><br>${prev.map(c=>
+    out.push(`<div class="dupw dupred"><b>⚠ ATTENTION : déjà ${rec?'recompté':'compté'} !</b><br>${prev.map(c=>
       `${fmt(c.qte)} à <b>${hms(c.created_at)}</b> par ${esc(c.compteur||'?')} — ${esc(lieu(c.zone,c.rack))}${samePlace(c)?' <b>(ici)</b>':''}${c._p?' (en attente)':''}`).join('<br>')}
-      <div class="small" style="margin-top:4px">${here.length?'<b>➕ Ajouter</b> : s\'ajoute aux saisies existantes · <b>♻️ Remplacer</b> : remplace la/les saisie(s) faite(s) ici.':'Compté ailleurs : si le stock est réparti dans plusieurs emplacements, ajoutez ; sinon, ne le recomptez pas.'}</div></div>`);
+      <div class="small" style="margin-top:6px">Choisissez : <b>➕ Ajouter</b> si ce sont d'autres pneus (stock réparti), <b>♻️ Remplacer</b> si vous recomptez les mêmes.</div></div>`);
   }
   if(!rec){
     const kn=known(ean,S.inv);
@@ -797,7 +811,8 @@ function renderDup(ean){
   $('aDup').innerHTML=out.join('');
   $('btnSave').classList.toggle('hidden',!!prev.length);
   $('saveChoice').classList.toggle('hidden',!prev.length);
-  $('btnReplace').classList.toggle('hidden',!here.length);
+  $('btnReplace').classList.remove('hidden');
+  updateSaveLabels();
   return {prev,here};
 }
 
@@ -1223,8 +1238,9 @@ function openArt(ean){
   $('newArt').classList.toggle('hidden',!!a); hide('editArt');
   $('btnEditArt').classList.toggle('hidden',!a || !isAdmin()); if(!a){$('naDes').value='';$('naStock').value=0;$('naPrix').value='';}
   $('aInfo').innerHTML = (a&&a.a_recompter?'<span class="pill warn">À recompter</span> ':'');
-  renderDup(ean);
-  $('aQty').value=1; show('artCard'); $('res').innerHTML=''; $('q').value='';
+  const dd=renderDup(ean);
+  if(dd.prev.length){ beep('warn'); }
+  $('aQty').value=1; updateSaveLabels(); show('artCard'); $('res').innerHTML=''; $('q').value='';
   $('artCard').scrollIntoView({behavior:'smooth',block:'center'});
   setTimeout(()=>{$('aQty').focus();$('aQty').select()},250);
 }
@@ -1280,20 +1296,22 @@ function resumeScan(){
   if(S.cam && S.scanning) S.cam.resume();
   else { $('reader').innerHTML=''; $('btnScan').scrollIntoView({behavior:'smooth',block:'center'}); }
 }
-function bump(d){ const i=$('aQty'); i.value=Math.max(0,(+i.value||0)+d); }
+function bump(d){ const i=$('aQty'); i.value=Math.max(0,(+i.value||0)+d); updateSaveLabels(); }
+$('aQty').addEventListener('input',updateSaveLabels);
 $('aQty').addEventListener('keydown',e=>{if(e.key==='Enter'){ if(!$('btnSave').classList.contains('hidden')) saveCount('add'); else $('btnAdd').focus(); }});
 async function saveCount(mode='add'){
   const q=+$('aQty').value; if(isNaN(q)||q<0) return toast('Quantité invalide','bad');
   const ean=S.cur;
   if(mode==='replace'){
-    const here=prevCounts(ean).filter(samePlace);
-    const ids=here.filter(c=>!c._p&&c.id).map(c=>c.id);
+    const tg=replaceTargets(prevCounts(ean));
+    const ids=tg.filter(c=>!c._p&&c.id).map(c=>c.id);
     if(ids.length){
       const {error}=await sb.from('comptages').delete().in('id',ids);
       if(error) return toast(/CLOTURE/.test(error.message)?'Inventaire clôturé : modification refusée':'Remplacement impossible : '+error.message,'bad');
       S.allC=S.allC.filter(c=>!ids.includes(c.id)); S.mine=S.mine.filter(c=>!ids.includes(c.id));
     }
-    Q=Q.filter(c=>!(c.inventaire_id===S.inv && c.ean===ean && !!c.recomptage===isRec(ean) && samePlace(c))); LS.set('queue',Q);
+    const tgp=new Set(tg.filter(c=>c._p).map(c=>c.created_at));
+    Q=Q.filter(c=>!(c.inventaire_id===S.inv && c.ean===ean && tgp.has(c.created_at))); LS.set('queue',Q);
   }
   addCount(ean,q);
   toast(`${mode==='replace'?'♻️ Remplacé : ':''}${fmt(q)} × ${artLabel(ean)}`,'ok');
