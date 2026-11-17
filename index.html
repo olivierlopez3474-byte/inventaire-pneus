@@ -143,6 +143,12 @@ body.noadmin #toast{bottom:24px!important}
 .opbar .invpill.test{background:#7b3fe4}
 #vBureau .toolbar{row-gap:8px}
 @media (max-width:700px){header.top{padding:8px 12px} #vBureau .toolbar .btn{padding:8px 10px;font-size:13px} .kpi .v{font-size:20px}}
+/* listes du bas (comptés / recomptage) et résultats : libellé plus lisible */
+#mine .it .t > div:first-child, #recList .it .t > div:first-child, #res .it .t > div:first-child{font-size:17px;font-weight:700;line-height:1.3;white-space:normal}
+#mine .it .t .muted, #recList .it .t .muted, #res .it .t .muted{font-size:14px}
+#mine .it .q{font-size:22px}
+#mine .it, #recList .it, #res .it{padding:12px 0}
+@media (min-width:700px){ #mine .it .t > div:first-child, #recList .it .t > div:first-child, #res .it .t > div:first-child{font-size:19px} #mine .it .t .muted, #recList .it .t .muted, #res .it .t .muted{font-size:15px} }
 .it.horsrow{background:#ffe8d6;border-radius:8px;padding-left:6px;padding-right:6px}
 .pill.horsp{background:#ffd3ad;color:#7a3b00}
 .art.horsf{border-left-color:#f0a76a}
@@ -558,7 +564,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v18.11 00:50';
+const APP_V='v18.11 00:55';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
