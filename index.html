@@ -153,9 +153,16 @@ body.noadmin #toast{bottom:24px!important}
 .modalbox{position:relative;background:#fff;width:100%;max-width:620px;max-height:86vh;overflow:auto;border-radius:18px 18px 0 0;padding:18px 18px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -8px 30px rgba(0,0,0,.25)}
 @media (min-width:700px){.modal{align-items:center}.modalbox{border-radius:18px}}
 .modalx{position:absolute;top:12px;right:12px;width:44px;height:44px;border-radius:50%;padding:0;font-size:18px}
-.mdgrid{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:16px;margin:12px 0}
+.mdgrid{display:grid;grid-template-columns:auto 1fr;gap:10px 18px;font-size:19px;margin:16px 0;align-items:baseline}
 .mdgrid span{color:var(--mute)}
-.mdgrid b{font-size:17px}
+.mdgrid b{font-size:22px}
+#mdBody .list .it{padding:12px 0}
+#mdBody .list .it .q{font-size:26px;min-width:48px}
+#mdBody .list .it .t > div:first-child{font-size:18px!important}
+#mdBody .list .it .t .muted{font-size:16px}
+#mdBody .list .it .btn{width:48px;height:48px;font-size:18px;padding:0}
+#mdBody .row .btn{padding:16px;font-size:18px}
+#mdBody .md-title{font-size:26px!important}
 .it.horsrow{background:#ffe8d6;border-radius:8px;padding-left:6px;padding-right:6px}
 .pill.horsp{background:#ffd3ad;color:#7a3b00}
 .art.horsf{border-left-color:#f0a76a}
@@ -577,7 +584,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v18.11 01:10';
+const APP_V='v18.11 01:15';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -1036,19 +1043,18 @@ function artDetail(ean){
   const row=(l,v)=>v?`<span>${l}</span><b>${v}</b>`:'';
   $('mdBody').innerHTML=`
     <div class="brandbig">${brandHtml(brandOf(a))}</div>
-    <div style="font-size:22px;font-weight:800;line-height:1.25;padding-right:50px">${esc(a.designation)}</div>
+    <div class="md-title" style="font-weight:800;line-height:1.25;padding-right:50px">${esc(a.designation)}</div>
     ${a.hors_feuille?'<span class="pill horsp" style="margin-top:6px">📦 Hors feuille — à régulariser</span>':''}
     <div class="mdgrid">
       ${row('Réf. (code modèle)',esc(a.reference||''))}
       ${row('Dimension',esc(fmtDim(a.dimension)))}
       ${row('Marque',esc(a.marque||brandOf(a)||''))}
       ${row('EAN',esc(ean))}
-      ${rec?'':row('Stock fichier',a.qte_theorique!=null?fmt(a.qte_theorique):'')}
       ${row('Compté',fmt(tot)+(cnt.some(c=>!c.recomptage)?'':' (rien)'))}
       ${totR||cnt.some(c=>c.recomptage)?row('Recompté',fmt(totR)):''}
       ${kn.length?row('Habituellement',esc(knownTxt(kn.slice(0,2)))):''}
     </div>
-    <div style="font-weight:800;margin:10px 0 4px">Saisies (${cnt.length})</div>
+    <div style="font-weight:800;font-size:20px;margin:12px 0 4px">Saisies (${cnt.length})</div>
     <div class="list">${cnt.map(c=>{ const ok=!c._p&&(isAdmin()||c.compteur===S.who); return `<div class="it">
       <div class="q">${fmt(c.qte)}</div>
       <div class="t"><div style="font-size:15px"><b>${hms(c.created_at)}</b>${c.source==='manuel'?' ✋':''} · ${esc(c.compteur||'?')}${c.recomptage?' · <span class="pill warn">recomptage</span>':''}${c._p?' · <span class="neg">en attente</span>':''}</div><div class="muted">${esc(lieu(c.zone,c.rack))}</div></div>
