@@ -143,6 +143,10 @@ body.noadmin #toast{bottom:24px!important}
 .opbar .invpill.test{background:#7b3fe4}
 #vBureau .toolbar{row-gap:8px}
 @media (max-width:700px){header.top{padding:8px 12px} #vBureau .toolbar .btn{padding:8px 10px;font-size:13px} .kpi .v{font-size:20px}}
+.it.horsrow{background:#ffe8d6;border-radius:8px;padding-left:6px;padding-right:6px}
+.pill.horsp{background:#ffd3ad;color:#7a3b00}
+.art.horsf{border-left-color:#f0a76a}
+tr.trhors td{background:#fff0e3}
 .it.notcounted{background:#f1e9fd;border-radius:8px;padding-left:6px;padding-right:6px}
 .pill.test{background:#e6dafb;color:#5a2bb0}
 .dupred{background:#fde3e1!important;border:2px solid var(--bad)!important;color:#7a1d16!important;font-size:14px}
@@ -236,7 +240,8 @@ body.noadmin #toast{bottom:24px!important}
   <div id="setup" class="card hidden">
     <h3 style="margin-top:0">Avant de commencer</h3>
     <label class="f">Inventaire — vérifiez bien lequel !</label>
-    <select id="sInv" style="font-weight:700"></select>
+    <select id="sInv" style="font-weight:700" onchange="presetDepot(true)"></select>
+    <div id="sInvInfo" class="small muted" style="margin-top:4px"></div>
     <label class="f">Opérateur</label>
     <select id="sWho"></select>
     <label class="f">Code opérateur</label>
@@ -361,6 +366,7 @@ body.noadmin #toast{bottom:24px!important}
       <b>Inventaire :</b>
       <select id="bInv" style="max-width:340px" onchange="loadBureau()"></select>
       <span id="bStatus"></span>
+      <div id="bInfo" class="small muted" style="flex-basis:100%"></div>
       <span style="flex:1"></span>
       <button class="btn dark" onclick="go('find')">🔎 Où est ce pneu ?</button>
       <button class="btn" onclick="showRefs()">👥 Dépôts & opérateurs</button>
@@ -373,10 +379,21 @@ body.noadmin #toast{bottom:24px!important}
 
   <!-- Import -->
   <div id="importBox" class="card hidden">
-    <h3 style="margin-top:0">Nouvel inventaire</h3>
-    <div class="row">
-      <div><label class="f">Nom</label><input id="iName" type="text"></div>
-      <div><label class="f">Fichier Excel du stock</label><input id="iFile" type="file" accept=".xlsx,.xls,.csv" onchange="readFile(this.files[0])"></div>
+    <h3 style="margin-top:0">Importer un fichier Excel</h3>
+    <div class="row" style="flex-wrap:wrap;gap:14px;margin-bottom:6px">
+      <label class="switch" style="flex:0 0 auto"><input type="radio" name="iType" value="inv" checked onchange="impType()"> <b>Nouvel inventaire</b> (extraction du stock à compter)</label>
+      <label class="switch" style="flex:0 0 auto"><input type="radio" name="iType" value="cat" onchange="impType()"> <b>📚 Base articles</b> (tous les articles de l'ERP, pour reconnaître les pneus hors feuille)</label>
+    </div>
+    <div><label class="f">Fichier Excel</label><input id="iFile" type="file" accept=".xlsx,.xls,.csv" onchange="readFile(this.files[0])"></div>
+    <div id="iInvFields">
+      <div class="row" style="flex-wrap:wrap">
+        <div style="min-width:220px"><label class="f">Nom de la feuille d'inventaire</label><input id="iName" type="text"></div>
+        <div style="min-width:220px"><label class="f">Commentaire</label><input id="iComment" type="text" placeholder="ex. Pneus tourisme"></div>
+      </div>
+      <div class="row" style="flex-wrap:wrap">
+        <div style="min-width:220px"><label class="f">Dépôt où a lieu l'inventaire</label><select id="iDepot"></select></div>
+        <div style="min-width:220px"><label class="f">Marque</label><input id="iMarque" type="text" list="iMarqueList" placeholder="ex. Michelin"><datalist id="iMarqueList"></datalist></div>
+      </div>
     </div>
     <div id="iMapBox" class="hidden">
       <p class="small muted">Vérifiez la correspondance des colonnes (détectée automatiquement) :</p>
@@ -540,7 +557,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 23:55';
+const APP_V='v18.11 00:15';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -557,7 +574,9 @@ async function updateInvStrip(){
   el.classList.remove('hidden','test','none');
   if(!inv){ el.textContent='Aucun inventaire sélectionné'; el.classList.add('none'); return; }
   const closed=inv.statut==='cloture';
-  el.textContent=label+(inv.actif?'⭐ ':closed?'🔒 ':/test/i.test(inv.nom)?'🧪 ':'📋 ')+inv.nom+(inv.actif?' (actif)':closed?' (clôturé)':'')+(inv.phase==='recomptage'&&!closed?' · 🔁 RECOMPTAGE':'');
+  const sub=[inv.commentaire?'💬 '+inv.commentaire:'', inv.depot?'📍 '+inv.depot:'', inv.marque?'🏷 '+inv.marque:''].filter(Boolean).join(' · ');
+  el.innerHTML=esc(label+(inv.actif?'⭐ ':closed?'🔒 ':/test/i.test(inv.nom)?'🧪 ':'📋 ')+inv.nom+(inv.actif?' (actif)':closed?' (clôturé)':'')+(inv.phase==='recomptage'&&!closed?' · 🔁 RECOMPTAGE':''))
+    + (sub?`<div style="font-weight:500;font-size:12px;opacity:.9">${esc(sub)}</div>`:'');
   if(!inv.actif) el.classList.add('test');
 }
 function invStripClick(){ if(LS.get('view')==='bureau') $('bInv').focus(); else if(S.inv) { go('saisie'); changeSetup(); } else go('saisie'); }
@@ -624,6 +643,7 @@ async function initSaisie(){
   if(st.inv && data.some(i=>i.id==st.inv)) $('sInv').value=st.inv;
   await loadRefs();
   fillRefSelects(st);
+  presetDepot(st.inv!=+$('sInv').value);
   show('setup'); hide('counting');
   // reprise automatique seulement si l'inventaire est toujours ouvert ET autorisé pour cet opérateur
   const opSaved=REF.ops.find(o=>o.nom===st.who&&o.actif);
@@ -697,6 +717,12 @@ function fillRefSelects(st={}){
   $('sRefHelp').classList.toggle('hidden',!!(deps.length&&ops.length));
 }
 $('sPin').addEventListener('keydown',e=>{if(e.key==='Enter')startCount()});
+// L'inventaire choisi impose (propose) son dépôt et affiche son commentaire / sa marque
+function presetDepot(force){
+  const iv=(S.invs||[]).find(i=>i.id==+$('sInv').value); if(!iv) return;
+  $('sInvInfo').textContent=[iv.commentaire?'💬 '+iv.commentaire:'', iv.depot?'📍 '+iv.depot:'', iv.marque?'🏷 '+iv.marque:''].filter(Boolean).join(' · ');
+  if(iv.depot && (force || !$('sZone').value)) $('sZone').value=iv.depot;
+}
 function switchDepot(z){
   if(!z) return; S.zone=z; S.rack=''; const st=LS.get('setup',{}); st.zone=z; st.rack=''; LS.set('setup',st);
   fillRacks(); toast('Dépôt : '+z,'ok'); if(S.cur) renderDup(S.cur); if($('recMode').checked) renderRecList();
@@ -842,7 +868,7 @@ async function loadLogos(){
 }
 async function loadArts(){
   try{
-    S.arts = await fetchAll('articles','id,ean,reference,designation,marque,dimension,qte_theorique,prix,a_recompter,extra',q=>q.eq('inventaire_id',S.inv));
+    S.arts = await fetchAll('articles','id,ean,reference,designation,marque,dimension,qte_theorique,prix,a_recompter,hors_feuille,extra',q=>q.eq('inventaire_id',S.inv));
     LS.set('arts_'+S.inv,S.arts);
   }catch(e){ S.arts = LS.get('arts_'+S.inv,[]); }
   S.byEan = new Map(S.arts.map(a=>[a.ean,a]));
@@ -884,6 +910,7 @@ function recItems(){
   });
   return S.arts.map(a=>{
     const theo=Number(a.qte_theorique)||0, c1=first[a.ean]||0, counted=a.ean in first;
+    if(a.hors_feuille) return null;            // hors feuille : régularisation manuelle, pas de recomptage
     if(c1===theo && counted) return null;      // pas d'écart
     if(!counted && theo<=0) return null;      // rien en stock, jamais compté : pas d'écart
     let places=[...(loc[a.ean]||[])].map(s=>JSON.parse(s));
@@ -931,9 +958,10 @@ function renderMine(){
   const shown = all.slice(0,MINE_LIMIT);
   $('mine').innerHTML = all.length ? shown.map(c=>{
      const mineOk = isAdmin() || c.compteur===S.who;
-     return `<div class="it">
+     const hf=(S.byEan.get(c.ean)||{}).hors_feuille;
+     return `<div class="it ${hf?'horsrow':''}">
      <div class="q">${fmt(c.qte)}</div>
-     <div class="t"><div>${esc(artLabel(c.ean))}</div><div class="muted"><b>${hms(c.created_at)}</b> · ${esc(c.compteur||'?')} · ${esc(lieu(c.zone,c.rack))}${c._p?' · <span class="neg">en attente</span>':''}</div></div>
+     <div class="t"><div>${esc(artLabel(c.ean))}${hf?' <span class="pill horsp">📦 hors feuille</span>':''}</div><div class="muted"><b>${hms(c.created_at)}</b> · ${esc(c.compteur||'?')} · ${esc(lieu(c.zone,c.rack))}${c._p?' · <span class="neg">en attente</span>':''}</div></div>
      ${c._p||!mineOk?'':`<button class="btn sm" onclick="editCount(${c.id})" title="Corriger la quantité">✏️</button><button class="btn sm red" onclick="delCount(${c.id})" title="Supprimer">✕</button>`}</div>`; }).join('')
      + (all.length>shown.length?`<button class="btn sm" style="width:100%;margin-top:8px" onclick="MINE_LIMIT+=100;renderMine()">Afficher plus (${all.length-shown.length} restantes)</button>`:'')
      : '<div class="muted">Aucune saisie pour l\'instant.</div>';
@@ -1230,16 +1258,23 @@ function onScan(txt){
     openArt(k);
   }
 }
+let CATHIT=null; // article trouvé dans la base articles (pas encore dans la feuille)
+async function catLookup(ean){
+  try{ const {data}=await sb.from('catalogue').select('*').eq('ean',ean).limit(1); return (data&&data[0])||null; }catch(e){ return null; }
+}
 function openArt(ean){
-  const a=S.byEan.get(ean); S.cur=ean;
-  $('artCard').classList.toggle('unk',!a);
+  const a=S.byEan.get(ean); S.cur=ean; CATHIT=null;
+  if(!a){ // hors feuille : on cherche dans la base articles
+    catLookup(ean).then(c=>{ if(S.cur!==ean || S.byEan.get(ean)) return; if(c){ CATHIT=c; showCatHit(c); } });
+  }
+  $('artCard').classList.toggle('unk',!a); $('artCard').classList.toggle('horsf',!!(a&&a.hors_feuille));
   $('aLogo').innerHTML = brandHtml(brandOf(a));
   $('aCode').textContent = ean;
   $('aName').textContent = a? a.designation : 'Code non référencé dans le fichier';
   $('aMeta').innerHTML = (a&&a.reference?'Réf. <b>'+esc(a.reference)+'</b> · ':'')+'EAN '+esc(ean);
   $('newArt').classList.toggle('hidden',!!a); hide('editArt');
   $('btnEditArt').classList.toggle('hidden',!a || !isAdmin()); if(!a){$('naDes').value='';$('naStock').value=0;$('naPrix').value='';}
-  $('aInfo').innerHTML = (a&&a.a_recompter?'<span class="pill warn">À recompter</span> ':'');
+  $('aInfo').innerHTML = (a&&a.hors_feuille?'<span class="pill horsp">📦 Hors feuille — à régulariser</span> ':'');
   const dd=renderDup(ean);
   if(dd.prev.length){ beep('warn'); }
   $('aQty').value=1; updateSaveLabels(); show('artCard'); $('res').innerHTML=''; $('q').value='';
@@ -1261,9 +1296,26 @@ async function saveEditArt(){
   Object.assign(a,upd); delete a._hay; LS.set('arts_'+S.inv,S.arts);
   hide('editArt'); toast('Article modifié','ok'); openArt(a.ean); renderMine();
 }
+function showCatHit(c){
+  $('artCard').classList.remove('unk'); $('artCard').classList.add('horsf');
+  $('aLogo').innerHTML=brandHtml(brandOf(c));
+  $('aName').textContent=c.designation||'(sans libellé)';
+  $('aMeta').innerHTML=(c.reference?'Réf. <b>'+esc(c.reference)+'</b> · ':'')+'EAN '+esc(c.ean);
+  $('aInfo').innerHTML='<div class="dupw" style="background:#ffe8d6;border-color:#f0a76a;color:#7a3b00"><b>📦 Hors feuille</b> : ce pneu n\'est pas dans le fichier de cet inventaire. Trouvé dans la base articles : il sera ajouté en fin d\'inventaire <b>pour régularisation</b>.</div>';
+  hide('newArt');
+}
+// crée l'article « hors feuille » dans l'inventaire (à partir de la base articles)
+async function ensureHorsFeuille(ean){
+  if(S.byEan.get(ean) || !CATHIT || CATHIT.ean!==ean) return true;
+  const c=CATHIT;
+  const row={inventaire_id:S.inv,ean,designation:c.designation||'(sans libellé)',reference:c.reference,marque:c.marque,dimension:c.dimension,prix:c.prix,qte_theorique:0,hors_feuille:true,extra:{...(c.extra||{}),hors_feuille_par:S.who,source:'base articles'}};
+  const {data,error}=await sb.from('articles').insert(row).select('id,ean,reference,designation,marque,dimension,qte_theorique,prix,a_recompter,hors_feuille,extra').single();
+  if(error){ toast('Ajout hors feuille impossible : '+error.message,'bad'); return false; }
+  S.arts.push(data); S.byEan.set(ean,data); LS.set('arts_'+S.inv,S.arts); CATHIT=null; return true;
+}
 async function createArt(){
   const des=$('naDes').value.trim(); if(!des) return toast('Indiquez une désignation','bad');
-  const row={inventaire_id:S.inv,ean:S.cur,designation:des,qte_theorique:+$('naStock').value||0,prix:$('naPrix').value===''?null:+$('naPrix').value,extra:{cree_par:S.who,cree_depuis:'telephone'}};
+  const row={inventaire_id:S.inv,ean:S.cur,designation:des,qte_theorique:+$('naStock').value||0,prix:$('naPrix').value===''?null:+$('naPrix').value,hors_feuille:!/test/i.test(((S.invs||[]).find(i=>i.id===S.inv)||{}).nom||''),extra:{cree_par:S.who,cree_depuis:'telephone'}};
   const {data,error}=await sb.from('articles').insert(row).select('id,ean,reference,designation,marque,dimension,qte_theorique,a_recompter').single();
   if(error) return toast(error.message,'bad');
   S.arts.push(data); S.byEan.set(data.ean,data); LS.set('arts_'+S.inv,S.arts);
@@ -1304,6 +1356,7 @@ $('aQty').addEventListener('keydown',e=>{if(e.key==='Enter'){ if(!$('btnSave').c
 async function saveCount(mode='add'){
   const q=+$('aQty').value; if(isNaN(q)||q<0) return toast('Quantité invalide','bad');
   const ean=S.cur;
+  if(!(await ensureHorsFeuille(ean))) return;
   if(mode==='replace'){
     const tg=replaceTargets(prevCounts(ean));
     const ids=tg.filter(c=>!c._p&&c.id).map(c=>c.id);
@@ -1372,6 +1425,7 @@ async function loadBureau(){
     ? ' <span class="pill bad">🔁 Recomptage en cours</span> <button class="btn sm" onclick="setPhase(\'comptage\')">↩ Revenir au comptage</button>'
     : ' <button class="btn sm dark" onclick="setPhase(\'recomptage\')">🔁 Lancer le recomptage</button>';
   $('btnClose').textContent = B.inv.statut==='cloture'?'Rouvrir':'Clôturer';
+  $('bInfo').innerHTML = [B.inv.commentaire?'💬 '+esc(B.inv.commentaire):'', B.inv.depot?'📍 '+esc(B.inv.depot):'', B.inv.marque?'🏷 '+esc(B.inv.marque):''].filter(Boolean).join(' · ');
   await refreshBureau();
   if(cptSub) sb.removeChannel(cptSub);
   let t; cptSub = sb.channel('cpt'+id).on('postgres_changes',{event:'*',schema:'public',table:'comptages',filter:'inventaire_id=eq.'+id},()=>{clearTimeout(t);t=setTimeout(refreshBureau,1500)}).subscribe();
@@ -1424,6 +1478,7 @@ function compute(){
     x.ref = x.art? x.art.reference : '';
     x.rec = x.art? x.art.a_recompter : false;
     x.negTheo = x.theo<0;
+    x.hors = !!(x.art && x.art.hors_feuille);
     x.known = known(x.ean,B.inv.id);
     x.lastDep = x.known[0]?.depot || '';
     x.knownTxt = knownTxt(x.known);
@@ -1431,7 +1486,8 @@ function compute(){
   });
 }
 const sets = {
-  ecarts:   ()=>B.rows.filter(r=>r.counted && r.ecart!==0 && !r.unknown),
+  ecarts:   ()=>B.rows.filter(r=>r.counted && r.ecart!==0 && !r.unknown && !r.hors),
+  horsf:    ()=>B.rows.filter(r=>r.hors),
   noncpt:   ()=>B.rows.filter(r=>!r.counted && r.theo!==0),
   nonref:   ()=>B.rows.filter(r=>r.unknown),
   doublons: ()=>B.rows.filter(r=>r.doublon),
@@ -1447,6 +1503,7 @@ const TABS = [
   ['doublons','Doublons','Risques de double comptage : même article compté dans plusieurs zones ou par plusieurs personnes (normal si le stock est réparti, sinon à vérifier), saisies identiques à moins de 20 s d\'intervalle par la même personne (double scan probable), ou EAN présent plusieurs fois dans le fichier.'],
   ['recompt','Recomptages','Articles signalés à recompter et résultat du recomptage. Le recomptage remplace le premier comptage dans le calcul des écarts.'],
   ['anomalies','Anomalies fichier','Lignes du fichier avec un stock négatif ou sans code EAN (impossibles à scanner : utiliser la recherche manuelle sur le téléphone).'],
+  ['horsf','Hors feuille (régul)','Pneus scannés qui n\'étaient pas dans le fichier importé (export partiel) : retrouvés dans la base articles ou créés sur place. Ils sont à régulariser manuellement dans votre logiciel. Ils n\'entrent pas dans les écarts ni dans le recomptage.'],
   ['tout','Tous les articles','Vue complète : stock du fichier, comptage, recomptage et écart pour chaque article.'],
   ['saisies','Journal des saisies','Toutes les saisies faites depuis les téléphones. Vous pouvez supprimer une saisie erronée.']
 ];
@@ -1483,6 +1540,7 @@ function cols(){
     case 'recompt': return [sel,...base,n('theo','Stock'),n('compte1','1er comptage'),n('recompte','Recompté'),n('ecart','Écart final',ec.f),{k:'zones',l:'Compté dans',f:r=>esc(r.lieux.join(', '))},{k:'lastDep',l:'Dernier dépôt connu',f:r=>esc(r.knownTxt)||'<span class="muted">—</span>'},{k:'st',l:'État',f:r=>r.recompte!=null?'<span class="pill ok">recompté</span>':'<span class="pill warn">en attente</span>'}];
     case 'anomalies': return [...base,n('theo','Stock'),{k:'pb',l:'Problème',f:r=>[r.negTheo?'<span class="pill bad">stock négatif</span>':'',(!r.art||!r.art.ean||r.ean.startsWith('LIGNE'))?'<span class="pill warn">sans EAN</span>':''].join(' ')},n('compte','Compté')];
     case 'tout': return [sel,...base,n('theo','Stock'),n('compte1','Compté'),n('recompte','Recompté'),ec,n('prix','Prix HT',r=>eur(r.prix)),n('valEcart','Écart €',r=>eur(r.valEcart)),{k:'zones',l:'Compté dans',f:r=>esc(r.lieux.join(', '))},{k:'lastDep',l:'Dernier dépôt connu',f:r=>esc(r.knownTxt)||'<span class="muted">—</span>'}];
+    case 'horsf': return [...base,{k:'marque',l:'Marque',f:r=>esc(r.art?.marque||'')},n('compte','Compté'),{k:'zones',l:'Compté dans',f:r=>esc(r.lieux.join(', '))},{k:'compteurs',l:'Par',f:r=>esc(r.compteurs.join(', '))},{k:'h',l:'Heure',f:r=>r.c.length?new Date(r.c.map(c=>c.created_at).sort().pop()).toLocaleString('fr-FR'):''}];
     case 'saisies': return [{k:'created_at',l:'Date',f:c=>new Date(c.created_at).toLocaleString('fr-FR')},{k:'compteur',l:'Par'},{k:'zone',l:'Dépôt'},{k:'rack',l:'Rack'},{k:'ean',l:'EAN'},{k:'_des',l:'Désignation',f:c=>{const a=B.rows.find(r=>r.ean===c.ean);return esc(a?a.des:'')}},n('qte','Qté'),{k:'recomptage',l:'Type',f:c=>c.recomptage?'<span class="pill warn">recomptage</span>':'comptage'},{k:'_x',l:'',f:c=>`<button class="btn sm" onclick="bEdit(${c.id})">✏️ Corriger</button> <button class="btn sm red" onclick="bDel(${c.id})">Supprimer</button>`}];
   }
 }
@@ -1505,6 +1563,7 @@ function curRows(){
   const f=norm($('fTxt').value);
   if(f) rows=rows.filter(r=>norm(Object.values(r).filter(v=>typeof v!=='object').join(' ')+' '+(r.des||'')).includes(f) || squash(r.des||'').includes(squash(f)));
   if(B.sort){ const {k,d}=B.sort; rows=[...rows].sort((a,b)=>{const x=a[k],y=b[k];return (x==null)-(y==null) || (x<y?-1:x>y?1:0)*d}); }
+  else if(B.tab==='tout') rows=[...rows].sort((a,b)=>(a.hors-b.hors));
   else if(B.tab==='ecarts') rows=[...rows].sort((a,b)=>Math.abs(b.valEcart??b.ecart)-Math.abs(a.valEcart??a.ecart));
   else if(B.tab==='saisies') rows=[...rows].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
   return rows;
@@ -1513,7 +1572,7 @@ function renderAna(){
   const C=cols(), rows=curRows();
   const lim=rows.slice(0,1500);
   $('anaTable').innerHTML = `<table><thead><tr>${C.map(c=>`<th class="${c.n?'n':''}" onclick="sortBy('${c.k}')">${c.l}${B.sort&&B.sort.k===c.k?(B.sort.d>0?' ▲':' ▼'):''}</th>`).join('')}</tr></thead><tbody>${
-    lim.map(r=>`<tr>${C.map(c=>`<td class="${c.n?'n':''}">${c.f?c.f(r):(c.n?fmt(r[c.k]):esc(r[c.k]))}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${C.length}" class="muted">Rien à signaler 👍</td></tr>`
+    lim.map(r=>`<tr ${r.hors?'class="trhors"':''}>${C.map(c=>`<td class="${c.n?'n':''}">${c.f?c.f(r):(c.n?fmt(r[c.k]):esc(r[c.k]))}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${C.length}" class="muted">Rien à signaler 👍</td></tr>`
   }</tbody></table>${rows.length>1500?'<p class="small muted">Affichage limité à 1500 lignes (l\'export contient tout).</p>':''}`;
   renderActions();
 }
@@ -1569,12 +1628,13 @@ async function deleteInv(){
 /* ---- export ---- */
 function exportXlsx(){
   const wb=XLSX.utils.book_new();
-  const line=r=>({'EAN':r.ean,'Désignation':r.des,'Référence':r.ref,'Marque':r.art?.marque||'','Stock fichier':r.theo,'Compté':r.compte1,'Recompté':r.recompte??'','Quantité retenue':r.compte,'Écart':r.ecart,'Prix HT':r.prix??'','Écart € HT':r.valEcart??'','Compté dans':(r.lieux||r.zones).join(', '),'Dernier dépôt connu':r.knownTxt||'','Compteurs':r.compteurs.join(', '),'Statut':r.unknown?'Non référencé':!r.counted?'Non compté':r.ecart===0?'OK':'Écart'});
+  const line=r=>({'EAN':r.ean,'Désignation':r.des,'Référence':r.ref,'Marque':r.art?.marque||'','Stock fichier':r.theo,'Compté':r.compte1,'Recompté':r.recompte??'','Quantité retenue':r.compte,'Écart':r.ecart,'Prix HT':r.prix??'','Écart € HT':r.valEcart??'','Compté dans':(r.lieux||r.zones).join(', '),'Dernier dépôt connu':r.knownTxt||'','Compteurs':r.compteurs.join(', '),'Statut':r.hors?'Hors feuille (régul)':r.unknown?'Non référencé':!r.counted?'Non compté':r.ecart===0?'OK':'Écart'});
   const add=(name,rows)=>XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows.length?rows:[{'':'Aucune ligne'}]),name);
   add('Inventaire complet',B.rows.map(line));
   add('Écarts',sets.ecarts().map(line));
   add('Non comptés',[...sets.noncpt()].sort((x,y)=>(x.lastDep||'zzz').localeCompare(y.lastDep||'zzz')||String(x.des).localeCompare(y.des)).map(line));
   add('Non référencés',sets.nonref().map(line));
+  add('Hors feuille (régul)',sets.horsf().map(line));
   add('Doublons',sets.doublons().map(r=>({...line(r),'Motif':[r.dupFile?'EAN double fichier':'',r.zones.length>1?'plusieurs zones':'',r.compteurs.length>1?'plusieurs compteurs':'',r.rapides?'saisies répétées <20s':''].filter(Boolean).join(', ')})));
   add('Journal saisies',B.cpt.map(c=>({'Date':new Date(c.created_at).toLocaleString('fr-FR'),'Compteur':c.compteur,'Dépôt':c.zone,'Rack':c.rack||'','EAN':c.ean,'Désignation':(B.rows.find(r=>r.ean===c.ean)||{}).des,'Quantité':Number(c.qte),'Type':c.recomptage?'Recomptage':'Comptage'})));
   XLSX.writeFile(wb,`Inventaire_${B.inv.nom.replace(/[^\w\-]+/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
@@ -1592,7 +1652,20 @@ const FIELDS=[
   ['prix','Prix HT (valorisation)',['h.t net','ht net','pmp','prix achat','prix ht','prix']],
   ['emplacement','Emplacement',['casier','emplacement','zone','rayon']]
 ];
-function showImport(){ openPanel('importBox'); hide('iMapBox'); $('iFile').value=''; $('iName').value='Inventaire '+new Date().toLocaleDateString('fr-FR',{month:'long',year:'numeric'}); }
+async function showImport(){
+  openPanel('importBox'); hide('iMapBox'); $('iFile').value='';
+  $('iName').value='Inventaire '+new Date().toLocaleDateString('fr-FR',{month:'long',year:'numeric'});
+  $('iComment').value=''; $('iMarque').value='';
+  await loadRefs();
+  $('iDepot').innerHTML='<option value="">— Aucun en particulier —</option>'+REF.deps.filter(d=>d.actif).map(d=>`<option>${esc(d.nom)}</option>`).join('');
+  try{ const {data}=await sb.from('marques').select('nom'); $('iMarqueList').innerHTML=(data||[]).map(r=>`<option value="${esc(r.nom)}">`).join(''); }catch(e){}
+  impType();
+}
+function impType(){
+  const cat=document.querySelector('input[name=iType]:checked').value==='cat';
+  $('iInvFields').classList.toggle('hidden',cat);
+  $('iGo').textContent = cat ? 'Importer dans la base articles' : "Importer et créer l'inventaire";
+}
 function readFile(f){
   if(!f) return;
   const rd=new FileReader();
@@ -1628,6 +1701,8 @@ function mapped(){
 }
 function previewImp(){
   const rows=mapped();
+  if($('iMarque') && !$('iMarque').value){ const c={}; rows.forEach(r=>{const b=brandOf(r); if(b) c[b]=(c[b]||0)+1;}); const top=Object.entries(c).sort((a,b)=>b[1]-a[1])[0];
+    if(top && top[1]>=rows.length*0.8) $('iMarque').value=top[0].charAt(0)+top[0].slice(1).toLowerCase(); }
   const noEan=rows.filter(r=>!/^\d+$/.test(r.ean)).length;
   const neg=rows.filter(r=>r.qte_theorique<0).length;
   const tot=rows.reduce((s,r)=>s+r.qte_theorique,0);
@@ -1635,8 +1710,9 @@ function previewImp(){
   $('iPrev').innerHTML=`<table><thead><tr><th>EAN</th><th>Désignation</th><th class="n">Stock</th><th>Réf.</th><th>Marque</th><th class="n">Prix HT</th></tr></thead><tbody>${rows.slice(0,8).map(r=>`<tr><td>${esc(r.ean)}</td><td>${esc(r.designation)}</td><td class="n">${fmt(r.qte_theorique)}</td><td>${esc(r.reference)}</td><td>${esc(r.marque)}</td><td class="n">${eur(r.prix)}</td></tr>`).join('')}</tbody></table>`;
 }
 async function doImport(){
-  const nom=$('iName').value.trim(); if(!nom) return toast('Donnez un nom','bad');
   const rows=mapped(); if(!rows.length) return toast('Fichier vide','bad');
+  if(document.querySelector('input[name=iType]:checked').value==='cat') return doImportCat(rows);
+  const nom=$('iName').value.trim(); if(!nom) return toast('Donnez un nom','bad');
   $('iGo').disabled=true; $('iGo').textContent='Import en cours…';
   try{
     const {data:open}=await sb.from('inventaires').select('id,nom,actif').eq('statut','en_cours');
@@ -1644,7 +1720,8 @@ async function doImport(){
     const makeAct = confirm(`Rendre « ${nom} » ACTIF ⭐ ?\n\nLes téléphones compteront alors dans ce nouvel inventaire.${curAct?`\n(Actuellement actif : « ${curAct.nom} »)`:''}\n\nOK = oui, le rendre actif · Annuler = non, le garder en attente`);
     const others=(open||[]).filter(i=>!/test/i.test(i.nom));
     const closeOthers = (makeAct && others.length) ? confirm(`Clôturer (verrouiller) les anciens inventaires encore en cours ?\n• ${others.map(i=>i.nom).join('\n• ')}\n\nOK = clôturer · Annuler = les laisser ouverts`) : false;
-    const {data:inv,error}=await sb.from('inventaires').insert({nom,fichier:$('iFile').files[0]?.name||null}).select().single();
+    const {data:inv,error}=await sb.from('inventaires').insert({nom,fichier:$('iFile').files[0]?.name||null,
+      commentaire:$('iComment').value.trim()||null, depot:$('iDepot').value||null, marque:$('iMarque').value.trim()||null}).select().single();
     if(error) throw error;
     for(let i=0;i<rows.length;i+=500){
       const {error:e2}=await sb.from('articles').insert(rows.slice(i,i+500).map(r=>({...r,inventaire_id:inv.id})));
@@ -1658,6 +1735,24 @@ async function doImport(){
     toast(`${rows.length} articles importés${makeAct?' — inventaire actif ⭐':' — en attente (bouton « ⭐ Rendre actif » quand vous êtes prêt)'}`,'ok'); closePanel('importBox'); initBureau(inv.id);
   }catch(e){ toast('Erreur : '+e.message,'bad'); }
   $('iGo').disabled=false; $('iGo').textContent="Importer et créer l'inventaire";
+}
+
+// Base articles (catalogue complet de l'ERP) : mise à jour par EAN
+async function doImportCat(rows){
+  const list=rows.filter(r=>/^\d{6,14}$/.test(r.ean)).map(r=>({ean:r.ean,designation:r.designation,reference:r.reference,marque:r.marque,dimension:r.dimension,prix:r.prix,extra:r.extra,updated_at:new Date().toISOString()}));
+  if(!list.length) return toast('Aucun EAN valide dans le fichier','bad');
+  const uniq=[...new Map(list.map(r=>[r.ean,r])).values()];
+  if(!confirm(`Importer ${uniq.length} articles dans la BASE ARTICLES ?\n\nLes articles existants (même EAN) seront mis à jour. Aucun inventaire n'est créé.`)) return;
+  $('iGo').disabled=true; $('iGo').textContent='Import en cours…';
+  try{
+    for(let i=0;i<uniq.length;i+=500){
+      const {error}=await sb.from('catalogue').upsert(uniq.slice(i,i+500),{onConflict:'ean'}); if(error) throw error;
+      $('iGo').textContent=`Import… ${Math.min(i+500,uniq.length)}/${uniq.length}`;
+    }
+    const {count}=await sb.from('catalogue').select('ean',{count:'exact',head:true});
+    toast(`📚 Base articles : ${uniq.length} importés · ${count??'?'} au total`,'ok'); closePanel('importBox');
+  }catch(e){ toast('Erreur : '+e.message,'bad'); }
+  $('iGo').disabled=false; impType();
 }
 
 /* ---- où est ce pneu ? (historique tous inventaires) ---- */
