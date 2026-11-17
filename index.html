@@ -80,7 +80,12 @@ label.f{display:block;font-size:12px;color:var(--mute);margin:10px 0 4px;text-tr
 .scanbtn{width:100%;padding:18px;font-size:18px;border-radius:14px}
 .art{border-left:6px solid var(--acc)}
 .art.unk{border-left-color:var(--bad)}
-.art h3{margin:0 0 4px;font-size:17px}
+.art h3{margin:2px 0 6px;font-size:22px;line-height:1.25}
+.arthead{display:flex;align-items:flex-start;gap:10px}
+.artbtns{flex:0 0 auto;display:flex;flex-direction:column;gap:8px}
+.artbtns .btn{width:44px;height:44px;padding:0;border-radius:50%;font-size:18px;line-height:44px}
+.artmeta{font-size:16px;color:#3d4048}
+.artmeta b{font-size:18px;color:var(--ink)}
 .qty{display:flex;align-items:center;gap:10px;margin:14px 0}
 .qty button{width:56px;height:56px;font-size:26px;border-radius:14px;border:0;background:#e9e6de;cursor:pointer}
 .qty input{text-align:center;font-size:28px;font-weight:700;height:56px}
@@ -241,7 +246,7 @@ body.noadmin #toast{bottom:24px!important}
 
   <div id="counting" class="hidden">
     <div class="opbar">
-      <span class="pill invpill" id="cInvPill" onclick="changeSetup()" title="Changer d'inventaire"></span>
+      <span class="pill invpill hidden" id="cInvPill" onclick="changeSetup()" title="Changer d'inventaire"></span>
       <div class="locrow">
         <label class="loc"><span>📍 Dépôt</span><select id="cZone" onchange="switchDepot(this.value)"></select></label>
         <label class="loc hidden" id="cRackBox"><span>🗄 Rack</span><select id="cRack" onchange="switchRack(this.value)"></select></label>
@@ -284,18 +289,18 @@ body.noadmin #toast{bottom:24px!important}
     </div>
 
     <div id="artCard" class="card art hidden">
-      <div class="row" style="align-items:flex-start">
-        <div style="flex:1">
+      <div class="arthead">
+        <div style="flex:1;min-width:0">
           <div id="aLogo" class="brandbig"></div>
           <div id="aCode" class="bigcode"></div>
           <h3 id="aName"></h3>
-          <div class="small muted" id="aMeta"></div>
+          <div id="aMeta" class="artmeta"></div>
           <div class="small" id="aInfo" style="margin-top:6px"></div>
           <div class="small" id="aDup" style="margin-top:6px"></div>
         </div>
-        <div style="display:flex;flex-direction:column;gap:6px">
-          <button class="btn sm" onclick="closeArt()">✕</button>
-          <button class="btn sm adminonly" id="btnEditArt" onclick="toggleEditArt()" title="Modifier l'article">✏️</button>
+        <div class="artbtns">
+          <button class="btn" onclick="closeArt()" title="Fermer">✕</button>
+          <button class="btn" id="btnEditArt" onclick="toggleEditArt()" title="Modifier l'article">✏️</button>
         </div>
       </div>
       <div id="editArt" class="hidden" style="margin-top:10px;padding:10px;background:#eef3fd;border-radius:10px">
@@ -536,7 +541,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 21:45';
+const APP_V='v17.11 22:00';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -1127,7 +1132,7 @@ function openArt(ean){
   $('aLogo').innerHTML = brandHtml(brandOf(a));
   $('aCode').textContent = ean;
   $('aName').textContent = a? a.designation : 'Code non référencé dans le fichier';
-  $('aMeta').textContent = 'EAN '+ean + (a&&a.reference?' · réf. '+a.reference:'');
+  $('aMeta').innerHTML = (a&&a.reference?'Réf. <b>'+esc(a.reference)+'</b> · ':'')+'EAN '+esc(ean);
   $('newArt').classList.toggle('hidden',!!a); hide('editArt');
   $('btnEditArt').classList.toggle('hidden',!a || !isAdmin()); if(!a){$('naDes').value='';$('naStock').value=0;$('naPrix').value='';}
   $('aInfo').innerHTML = (a&&a.a_recompter?'<span class="pill warn">À recompter</span> ':'');
