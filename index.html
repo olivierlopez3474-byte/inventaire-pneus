@@ -514,7 +514,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 20:30';
+const APP_V='v17.11 20:40';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 function go(v,push=true){
@@ -859,9 +859,12 @@ class Cam{
       if(caps.focusMode&&caps.focusMode.includes('continuous')) adv.focusMode='continuous';
       if(caps.zoom&&caps.zoom.max>=2) adv.zoom=1.6; // léger zoom : rester à distance = image nette
       if(Object.keys(adv).length) this.track.applyConstraints({advanced:[adv]}).catch(()=>{});
-      if(caps.torch){ const b=this.box.querySelector('.camtorch'); b.classList.remove('hidden'); let t=false;
-        b.onclick=()=>{ t=!t; this.track.applyConstraints({advanced:[{torch:t}]}).catch(()=>{}); b.classList.toggle('on',t); }; }
     }catch(e){}
+    // Lampe : certains téléphones n'annoncent le flash qu'après quelques instants → on revérifie
+    const b=this.box.querySelector('.camtorch'); let t=false;
+    b.onclick=()=>{ t=!t; this.track.applyConstraints({advanced:[{torch:t}]}).then(()=>b.classList.toggle('on',t)).catch(()=>{ t=!t; toast('Lampe non disponible sur cet appareil','bad'); }); };
+    const chk=()=>{ try{ const c=this.track&&this.track.getCapabilities?this.track.getCapabilities():{}; if(c.torch||('torch' in (this.track.getSettings?this.track.getSettings():{}))){ b.classList.remove('hidden'); return true; } }catch(e){} return false; };
+    if(!chk()) [400,1200,2500,4000].forEach(ms=>setTimeout(()=>{ if(this.on && b.classList.contains('hidden')) chk(); },ms));
     this.canvas=document.createElement('canvas'); this.ctx=this.canvas.getContext('2d',{willReadFrequently:true});
     this.on=true; this.loop(det);
   }
