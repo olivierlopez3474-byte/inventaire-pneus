@@ -253,7 +253,6 @@ body.noadmin #toast{bottom:24px!important}
       </div>
       <span class="pill bad hidden" id="cPend"></span>
       <span style="flex:1"></span>
-      <button class="btn sm" id="btnRec" onclick="toggleRecMode()">🔁 Recomptage</button>
       <button class="btn sm" onclick="toggleExpected()">📋 Attendus dans ce dépôt</button>
     </div>
     <div id="expBox" class="card hidden" style="padding:12px 14px">
@@ -266,7 +265,7 @@ body.noadmin #toast{bottom:24px!important}
 
     <div id="recBox" class="card hidden" style="border:3px solid var(--warn);background:#fffaf0">
       <div class="row"><b style="font-size:17px">🔁 MODE RECOMPTAGE</b><span class="small" id="recN" style="text-align:right"></span></div>
-      <div class="small muted" style="margin:4px 0 8px">Articles en écart (compté ≠ stock), classés par rack puis par libellé. Chaque saisie remplace le premier comptage.</div>
+      <div class="small muted" style="margin:4px 0 8px">Lancé par l'admin. Articles en écart (compté ≠ stock), classés par rack puis par libellé. Chaque saisie remplace le premier comptage (qui reste conservé).</div>
       <div class="list small res" id="recList" style="max-height:340px"></div>
     </div>
 
@@ -535,7 +534,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 22:30';
+const APP_V='v17.11 22:45';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -552,7 +551,7 @@ async function updateInvStrip(){
   el.classList.remove('hidden','test','none');
   if(!inv){ el.textContent='Aucun inventaire sélectionné'; el.classList.add('none'); return; }
   const closed=inv.statut==='cloture';
-  el.textContent=label+(inv.actif?'⭐ ':closed?'🔒 ':/test/i.test(inv.nom)?'🧪 ':'📋 ')+inv.nom+(inv.actif?' (actif)':closed?' (clôturé)':'');
+  el.textContent=label+(inv.actif?'⭐ ':closed?'🔒 ':/test/i.test(inv.nom)?'🧪 ':'📋 ')+inv.nom+(inv.actif?' (actif)':closed?' (clôturé)':'')+(inv.phase==='recomptage'&&!closed?' · 🔁 RECOMPTAGE':'');
   if(!inv.actif) el.classList.add('test');
 }
 function invStripClick(){ if(LS.get('view')==='bureau') $('bInv').focus(); else if(S.inv) { go('saisie'); changeSetup(); } else go('saisie'); }
@@ -725,7 +724,7 @@ async function startCount(silent){
   $('sPin').value='';
   setTimeout(updateInvStrip,0);
   const rack0 = st0.zone===zone ? (st0.rack||'') : '';
-  LS.set('setup',{inv,who,zone,rack:rack0,active:true,rec:!!st0.rec&&st0.inv===inv});
+  LS.set('setup',{inv,who,zone,rack:rack0,active:true});
   S.inv=inv; S.who=who; S.zone=zone; S.rack=rack0;
   $('cInv').textContent=((S.invs||[]).find(i=>i.id===inv)||{}).nom||$('sInv').selectedOptions[0].text;
   { const iv=(S.invs||[]).find(i=>i.id===inv)||{nom:$('sInv').selectedOptions[0].text}, nm=iv.nom, test=/test/i.test(nm);
@@ -736,7 +735,7 @@ async function startCount(silent){
   loadLogos();
   await loadArts(); await loadMine(); subscribeArts();
   await loadAllCounts(); loadMem();
-  toggleRecMode(!!LS.get('setup',{}).rec);
+  applyPhase(((S.invs||[]).find(i=>i.id===S.inv)||{}).phase,false); subscribeInv();
 }
 
 /* ---- contrôle des doublons en direct ---- */
@@ -825,13 +824,21 @@ function subscribeArts(){
 }
 // Mode recomptage : toutes les saisies faites dans ce mode sont des recomptages
 function isRec(ean){ return $('recMode').checked; }
-function toggleRecMode(force){
-  const on = typeof force==='boolean' ? force : !$('recMode').checked;
+// La phase (comptage / recomptage) est décidée par l'admin pour tout l'inventaire
+function applyPhase(phase,announce){
+  const on = phase==='recomptage', was=$('recMode').checked;
   $('recMode').checked=on;
-  const st=LS.get('setup',{}); st.rec=on; LS.set('setup',st);
-  $('btnRec').classList.toggle('dark',on); $('btnRec').textContent=on?'🔁 Recomptage : ACTIF':'🔁 Recomptage';
-  renderRecList(); if(S.cur) renderDup(S.cur);
-  if(typeof force!=='boolean') toast(on?'Mode recomptage activé':'Retour au comptage normal', on?'bad':'ok');
+  renderRecList(); if(S.cur) renderDup(S.cur); updateInvStrip();
+  if(announce && on!==was){ beep(on?'warn':true); toast(on?'🔁 L\'admin a lancé le RECOMPTAGE':'L\'admin a remis le comptage normal', on?'bad':'ok'); }
+}
+let invSub;
+function subscribeInv(){
+  if(invSub) sb.removeChannel(invSub);
+  invSub = sb.channel('inv'+S.inv).on('postgres_changes',{event:'UPDATE',schema:'public',table:'inventaires',filter:'id=eq.'+S.inv},p=>{
+    const iv=(S.invs||[]).find(i=>i.id===S.inv); if(iv) Object.assign(iv,p.new);
+    if(p.new.statut==='cloture'){ toast('🔒 Cet inventaire vient d\'être clôturé par l\'admin','bad'); }
+    applyPhase(p.new.phase,true);
+  }).subscribe();
 }
 // Liste des écarts : compté (1er comptage) ≠ stock, y compris jamais compté avec du stock
 function recItems(){
@@ -1304,6 +1311,9 @@ async function loadBureau(){
   $('bStatus').innerHTML = B.inv.statut==='cloture' ? '<span class="pill">🔒 Clôturé</span>'
     : B.inv.actif ? '<span class="pill warn">⭐ Inventaire actif</span>'
     : '<span class="pill ok">En cours</span> <button class="btn sm pri" onclick="makeActive()">⭐ Rendre actif</button>';
+  if(B.inv.statut!=='cloture') $('bStatus').innerHTML += B.inv.phase==='recomptage'
+    ? ' <span class="pill bad">🔁 Recomptage en cours</span> <button class="btn sm" onclick="setPhase(\'comptage\')">↩ Revenir au comptage</button>'
+    : ' <button class="btn sm dark" onclick="setPhase(\'recomptage\')">🔁 Lancer le recomptage</button>';
   $('btnClose').textContent = B.inv.statut==='cloture'?'Rouvrir':'Clôturer';
   await refreshBureau();
   if(cptSub) sb.removeChannel(cptSub);
@@ -1472,6 +1482,14 @@ async function bDel(id){
   if(!confirm('Supprimer cette saisie ?'))return;
   const {error}=await sb.from('comptages').delete().eq('id',id); if(error) return toast(error.message,'bad');
   refreshBureau();
+}
+async function setPhase(ph){
+  const msg = ph==='recomptage'
+    ? `Lancer le RECOMPTAGE de « ${B.inv.nom} » ?\n\nTous les téléphones basculeront en mode recomptage : ils verront la liste des articles en écart, classée par rack, et chaque saisie remplacera le premier comptage (qui reste conservé).`
+    : `Revenir au COMPTAGE normal pour « ${B.inv.nom} » ?`;
+  if(!confirm(msg)) return;
+  const {error}=await sb.from('inventaires').update({phase:ph}).eq('id',B.inv.id); if(error) return toast(error.message,'bad');
+  toast(ph==='recomptage'?'Recomptage lancé sur tous les téléphones':'Retour au comptage normal','ok'); initBureau(B.inv.id);
 }
 async function makeActive(){ ACT_INV=null;
   if(!confirm(`Rendre « ${B.inv.nom} » actif ?\n\nLes téléphones compteront désormais dans cet inventaire.`)) return;
