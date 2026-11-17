@@ -14,6 +14,14 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
+.opcard{border:1px solid #e3dfd5;border-radius:12px;padding:12px;margin:8px 0;background:#fff}
+.opcard.off{opacity:.55}
+.ophead{font-size:18px;margin-bottom:8px}
+.seg{display:flex;border:2px solid #d8d3c6;border-radius:10px;overflow:hidden;margin-bottom:8px}
+.seg button{flex:1;padding:10px 6px;border:0;background:#f4f2ec;font-size:16px;font-weight:800;color:#666;cursor:pointer}
+.seg button small{display:block;font-size:11px;font-weight:600;opacity:.8}
+.seg button.on{background:#1a1b22;color:#fff}.seg button.on.adm{background:#f2b705;color:#1a1b22}
+.opbtns{display:flex;flex-wrap:wrap;gap:6px}
 td.c-des,th.c-des{min-width:260px}
 .dt{white-space:nowrap;line-height:1.2}.dt b{display:block}.dt span{font-size:12px;color:#888}
 th.c-last{white-space:normal;max-width:80px}
@@ -581,7 +589,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v18.11 02:40';
+const APP_V='v18.11 02:50';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -1929,12 +1937,12 @@ async function showRefs(){
       <button class="btn sm" onclick="editRacks(${d.id})">Racks</button>
       <button class="btn sm" onclick="renRef('depots',${d.id},this.dataset.n)" data-n="${esc(d.nom)}">Renommer</button>
       <button class="btn sm ${d.actif?'red':''}" onclick="togRef('depots',${d.id},${!d.actif})">${d.actif?'Désactiver':'Réactiver'}</button></div>`).join('') : '<div class="muted">Aucun dépôt</div>';
-  $('rOps').innerHTML = REF.ops.length ? REF.ops.map(o=>`<div class="it">
-      <div class="t"><div><b style="${o.actif?'':'text-decoration:line-through;opacity:.6'}">${esc(o.nom)}</b> <span class="pill ${o.role==='admin'?'warn':''}">${o.role==='admin'?'Admin':'Standard'}</span> <span class="muted">code ${esc(o.code)}</span></div></div>
-      <button class="btn sm" onclick="roleOp(${o.id},'${o.role==='admin'?'standard':'admin'}')">${o.role==='admin'?'→ Standard':'→ Admin'}</button>
-      <button class="btn sm" onclick="renRef('operateurs',${o.id},this.dataset.n)" data-n="${esc(o.nom)}">Renommer</button>
-      <button class="btn sm" onclick="codeOp(${o.id})">Code</button>
-      <button class="btn sm ${o.actif?'red':''}" onclick="togRef('operateurs',${o.id},${!o.actif})">${o.actif?'Désactiver':'Réactiver'}</button></div>`).join('') : '<div class="muted">Aucun opérateur — ajoutez au moins une personne.</div>';
+  $('rOps').innerHTML = REF.ops.length ? REF.ops.map(o=>`<div class="opcard ${o.actif?'':'off'}">
+      <div class="ophead"><b>👤 ${esc(o.nom)}</b> <span class="muted">code ${esc(o.code)}</span>${o.actif?'':' <span class="pill bad">désactivé</span>'}</div>
+      <div class="seg"><button class="${o.role!=='admin'?'on':''}" onclick="roleOp(${o.id},'standard')">Standard<small>scan seulement</small></button><button class="${o.role==='admin'?'on adm':''}" onclick="roleOp(${o.id},'admin')">⚙️ Admin<small>tout l'accès</small></button></div>
+      <div class="opbtns"><button class="btn sm" onclick="renRef('operateurs',${o.id},this.dataset.n)" data-n="${esc(o.nom)}">✏️ Renommer</button>
+      <button class="btn sm" onclick="codeOp(${o.id})">🔢 Changer le code</button>
+      <button class="btn sm ${o.actif?'red':''}" onclick="togRef('operateurs',${o.id},${!o.actif})">${o.actif?'Désactiver':'Réactiver'}</button></div></div>`).join('') : '<div class="muted">Aucun opérateur — ajoutez au moins une personne.</div>';
 }
 async function refErr(error){ toast(/duplicate|unique/i.test(error.message)?'Ce nom existe déjà':/check/i.test(error.message)?'Le code doit faire 4 à 6 chiffres':error.message,'bad'); }
 async function addDepot(){
@@ -1980,6 +1988,7 @@ function compactRacks(r){
   return parts.concat(other).join(', ');
 }
 async function roleOp(id,role){
+  if((REF.ops.find(o=>o.id===id)||{}).role===role) return;
   if(role==='standard' && REF.ops.filter(o=>o.actif&&o.role==='admin'&&o.id!==id).length===0) return toast('Il faut garder au moins un administrateur','bad');
   const {error}=await sb.from('operateurs').update({role}).eq('id',id); if(error) return refErr(error);
   const o=REF.ops.find(x=>x.id===id); if(o && ROLE && ROLE.who===o.nom){ o.role=role; setRole(o); if(!isAdmin()) go('saisie'); }
