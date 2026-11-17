@@ -125,6 +125,8 @@ body.noadmin #toast{bottom:24px!important}
 .opbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
 .opbar select.pill{width:auto;border:0;padding:5px 8px;font-size:13px;font-weight:600}
 .opbar .pill{font-size:13px;padding:5px 9px}
+.opbar .invpill{flex-basis:100%;text-align:center;background:var(--ink);color:#fff;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.opbar .invpill.test{background:#7b3fe4}
 #vBureau .toolbar{row-gap:8px}
 @media (max-width:700px){header.top{padding:8px 12px} #vBureau .toolbar .btn{padding:8px 10px;font-size:13px} .kpi .v{font-size:20px}}
 .dupw{background:#fdf0d5;border:1px solid #f0cf86;color:#7a4a00;border-radius:10px;padding:10px 12px;margin-bottom:6px}
@@ -209,8 +211,8 @@ body.noadmin #toast{bottom:24px!important}
 
   <div id="setup" class="card hidden">
     <h3 style="margin-top:0">Avant de commencer</h3>
-    <label class="f">Inventaire</label>
-    <select id="sInv"></select>
+    <label class="f">Inventaire — vérifiez bien lequel !</label>
+    <select id="sInv" style="font-weight:700"></select>
     <label class="f">Opérateur</label>
     <select id="sWho"></select>
     <label class="f">Code opérateur</label>
@@ -224,6 +226,7 @@ body.noadmin #toast{bottom:24px!important}
 
   <div id="counting" class="hidden">
     <div class="opbar">
+      <span class="pill invpill" id="cInvPill" onclick="changeSetup()" title="Changer d'inventaire"></span>
       <span class="pill blue" id="cWho"></span>
       <select id="cZone" class="pill warn" onchange="switchDepot(this.value)"></select>
       <select id="cRack" class="pill hidden" onchange="switchRack(this.value)"></select>
@@ -508,7 +511,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 19:40';
+const APP_V='v17.11 19:50';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 function go(v,push=true){
@@ -662,7 +665,9 @@ async function startCount(silent){
   const rack0 = st0.zone===zone ? (st0.rack||'') : '';
   LS.set('setup',{inv,who,zone,rack:rack0,active:true});
   S.inv=inv; S.who=who; S.zone=zone; S.rack=rack0;
-  $('cInv').textContent=$('sInv').selectedOptions[0].text; $('cWho').textContent='👤 '+who;
+  $('cInv').textContent=$('sInv').selectedOptions[0].text;
+  { const nm=$('sInv').selectedOptions[0].text, test=/test/i.test(nm);
+    $('cInvPill').textContent=(test?'🧪 ':'📋 ')+nm; $('cInvPill').classList.toggle('test',test); } $('cWho').textContent='👤 '+who;
   $('cZone').innerHTML=REF.deps.filter(d=>d.actif||d.nom===zone).map(d=>`<option ${d.nom===zone?'selected':''}>${esc(d.nom)}</option>`).join('');
   fillRacks();
   hide('setup'); show('counting');
