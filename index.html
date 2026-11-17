@@ -99,6 +99,12 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 .prev{overflow:auto;max-height:240px;font-size:12px}
 .prev td,.prev th{white-space:nowrap;padding:4px 8px}
 .help{background:#fffaf0;border:1px solid #f3e2b6;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:10px}
+.gear{background:none;border:0;color:#fff;font-size:22px;line-height:1;padding:4px 6px;cursor:pointer;opacity:.8}
+.opbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.opbar select.pill{width:auto;border:0;padding:5px 8px;font-size:13px;font-weight:600}
+.opbar .pill{font-size:13px;padding:5px 9px}
+#vBureau .toolbar{row-gap:8px}
+@media (max-width:700px){header.top{padding:8px 12px} #vBureau .toolbar .btn{padding:8px 10px;font-size:13px} .kpi .v{font-size:20px}}
 .dupw{background:#fdf0d5;border:1px solid #f0cf86;color:#7a4a00;border-radius:10px;padding:10px 12px;margin-bottom:6px}
 .brandbig{margin-bottom:8px;min-height:0}
 .brandbig img{max-height:48px;max-width:180px;object-fit:contain;display:block}
@@ -151,12 +157,11 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 <div id="app" class="hidden">
 <header class="top">
   <div class="logo"></div><h1>Inventaire</h1>
-  <button class="tab" data-v="saisie" onclick="go('saisie')">📱 Comptage</button>
-  <button class="tab" data-v="bureau" onclick="go('bureau')">💻 Bureau</button>
+  <span id="hdrMode" class="small" style="color:#999"></span>
   <div class="sp"></div>
   <span id="netState" class="small"></span>
-  <button id="btnInstall" class="btn sm pri hidden" onclick="installApp()">Installer l'appli</button>
-  <button class="lnk" onclick="logout()">Quitter</button>
+  <button id="btnInstall" class="btn sm pri hidden" onclick="installApp()">Installer</button>
+  <button id="gear" class="gear" onclick="go(LS.get('view')==='bureau'?'saisie':'bureau')" title="Paramètres / administration">⚙</button>
 </header>
 <main>
 
@@ -182,20 +187,22 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
   </div>
 
   <div id="counting" class="hidden">
-    <div class="card" style="padding:12px 14px">
-      <div class="ctx">
-        <span class="pill" id="cInv"></span>
-        <span class="pill blue" id="cWho"></span>
-        <select id="cZone" class="pill warn" style="width:auto;border:0;padding:4px 8px" onchange="switchDepot(this.value)"></select>
-        <span class="pill bad hidden" id="cPend"></span>
-        <span style="flex:1"></span>
-        <button class="btn sm" onclick="changeSetup()">Changer</button>
-      </div>
-      <div class="row" style="margin-top:10px">
-        <label class="switch"><input type="checkbox" id="fast"> Mode rapide (1 scan = 1 pneu)</label>
-      </div>
-      <div class="row" style="margin-top:6px">
-        <label class="switch"><input type="checkbox" id="recMode" onchange="renderRecList();if(S.cur)renderDup(S.cur)"> Mode recomptage</label>
+    <div class="opbar">
+      <span class="pill blue" id="cWho"></span>
+      <select id="cZone" class="pill warn" onchange="switchDepot(this.value)"></select>
+      <span class="pill hidden" id="cFast">⚡ rapide</span>
+      <span class="pill warn hidden" id="cRec">🔁 recomptage</span>
+      <span class="pill bad hidden" id="cPend"></span>
+      <span style="flex:1"></span>
+      <button class="btn sm" id="btnOpt" onclick="toggleOpt()">⋯</button>
+    </div>
+    <div id="optBox" class="card hidden" style="padding:12px 14px">
+      <div class="small muted">Inventaire : <b id="cInv"></b></div>
+      <label class="switch" style="margin-top:10px"><input type="checkbox" id="fast" onchange="modeBadges()"> Mode rapide (1 scan = 1 pneu)</label>
+      <label class="switch" style="margin-top:8px"><input type="checkbox" id="recMode" onchange="modeBadges();renderRecList();if(S.cur)renderDup(S.cur)"> Mode recomptage</label>
+      <div class="row" style="margin-top:12px">
+        <button class="btn sm" onclick="changeSetup()">Changer d'opérateur / inventaire</button>
+        <button class="btn sm" onclick="simScan()">🧪 Simuler un scan</button>
       </div>
     </div>
 
@@ -207,17 +214,9 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
     <div id="reader"></div>
     <button id="btnScan" class="btn dark scanbtn" onclick="toggleScan()">📷 Scanner un code-barres</button>
 
-    <div class="card" style="margin-top:12px;padding:12px 14px">
-      <div class="row">
-        <input id="kbEan" type="text" inputmode="numeric" placeholder="Taper un EAN (ou douchette)…" style="flex:3">
-        <button class="btn" onclick="kbScan()">OK</button>
-      </div>
-      <button class="btn sm" style="margin-top:8px;width:100%" onclick="simScan()">🧪 Simuler un scan (article au hasard)</button>
-    </div>
-
     <div class="card" style="margin-top:12px">
       <div class="row">
-        <input id="q" type="search" placeholder="Recherche : EAN, dimension (205/55R16), modèle…" oninput="searchArt()" inputmode="search">
+        <input id="q" type="search" placeholder="EAN, dimension (205/55R16), modèle…" oninput="searchArt()" inputmode="search" enterkeyhint="search">
       </div>
       <div id="res" class="list res small"></div>
     </div>
@@ -269,6 +268,8 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
       <button class="btn" onclick="showBrands()">🏷 Marques & logos</button>
       <button class="btn" onclick="newEmptyInv()">🧪 Inventaire vide (test)</button>
       <button class="btn pri" onclick="showImport()">＋ Nouvel inventaire (import Excel)</button>
+      <button class="btn" onclick="go('saisie')">📱 Écran opérateur</button>
+      <button class="btn red" onclick="logout()">Se déconnecter</button>
     </div>
   </div>
 
@@ -420,7 +421,9 @@ async function logout(){ await stopScan(); await sb.auth.signOut(); location.rel
 
 function go(v){
   LS.set('view',v);
-  document.querySelectorAll('header .tab').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  $('gear').textContent = v==='bureau' ? '📱' : '⚙';
+  $('gear').title = v==='bureau' ? 'Retour au comptage' : 'Paramètres / administration';
+  $('hdrMode').textContent = v==='bureau' ? 'Administration' : '';
   if(v==='saisie'){ hide('vBureau'); show('vSaisie'); initSaisie(); }
   else { stopScan(); hide('vSaisie'); show('vBureau'); initBureau(); }
 }
@@ -678,8 +681,14 @@ async function createArt(){
   S.arts.push(data); S.byEan.set(data.ean,data); LS.set('arts_'+S.inv,S.arts);
   toast('Article créé','ok'); openArt(data.ean);
 }
-function kbScan(){ const v=$('kbEan').value.trim(); if(!v) return; $('kbEan').value=''; S.lastCode=''; onScan(v); }
-$('kbEan').addEventListener('keydown',e=>{if(e.key==='Enter')kbScan()});
+// Entrée dans la recherche avec un code numérique (clavier ou douchette) = scan
+$('q').addEventListener('keydown',e=>{
+  if(e.key!=='Enter') return;
+  const v=$('q').value.replace(/\s/g,'');
+  if(/^\d{6,14}$/.test(v)){ e.preventDefault(); $('q').value=''; $('res').innerHTML=''; S.lastCode=''; onScan(v); }
+});
+function toggleOpt(){ $('optBox').classList.toggle('hidden'); }
+function modeBadges(){ $('cFast').classList.toggle('hidden',!$('fast').checked); $('cRec').classList.toggle('hidden',!$('recMode').checked); }
 function simScan(){
   if(!S.arts.length) return toast('Aucun article dans cet inventaire','bad');
   const a=S.arts[Math.floor(Math.random()*S.arts.length)]; S.lastCode=''; onScan(a.ean);
