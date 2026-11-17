@@ -104,6 +104,8 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 #bnav button i{font-style:normal;font-size:20px;line-height:1}
 #bnav button.on{background:#2b2e36;color:var(--acc)}
 #app main{padding-bottom:90px}
+body.noadmin #app main{padding-bottom:20px}
+body.noadmin #toast{bottom:24px!important}
 #toast{bottom:90px!important}
 .gear{background:none;border:0;color:#fff;font-size:22px;line-height:1;padding:4px 6px;cursor:pointer;opacity:.8}
 .opbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
@@ -175,7 +177,20 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 <section id="vSaisie" class="hidden">
   <div id="noInv" class="card hidden">
     <b>Aucun inventaire en cours.</b>
-    <p class="muted small">Créez-en un depuis l'écran « Bureau » sur le PC en important le fichier Excel du stock.</p>
+    <p class="muted small">Un administrateur doit d'abord en créer un en important le fichier Excel du stock.</p>
+    <button class="btn sm" style="width:100%;margin-top:10px" onclick="showAdmLogin()">🔐 Accès administrateur</button>
+  </div>
+
+  <div id="admBox" class="card hidden">
+    <h3 style="margin-top:0">🔐 Accès administrateur</h3>
+    <label class="f">Administrateur</label>
+    <select id="aWho"></select>
+    <label class="f">Code</label>
+    <input id="aPin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="••••" autocomplete="off">
+    <div class="row" style="margin-top:14px">
+      <button class="btn" onclick="hide('admBox')">Annuler</button>
+      <button class="btn pri" onclick="adminLogin()">Entrer</button>
+    </div>
   </div>
 
   <div id="setup" class="card hidden">
@@ -190,6 +205,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
     <select id="sZone"></select>
     <div id="sRefHelp" class="help hidden" style="margin-top:10px">Aucun opérateur ou dépôt : créez-les dans <b>⚙ Admin</b> (en bas) → « 👥 Dépôts & opérateurs ».</div>
     <button class="btn pri" style="width:100%;margin-top:16px" onclick="startCount()">Commencer le comptage</button>
+    <button class="btn sm" style="width:100%;margin-top:10px" onclick="showAdmLogin()">🔐 Accès administrateur</button>
   </div>
 
   <div id="counting" class="hidden">
@@ -209,7 +225,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
       <label class="switch" style="margin-top:8px"><input type="checkbox" id="recMode" onchange="modeBadges();renderRecList();if(S.cur)renderDup(S.cur)"> Mode recomptage</label>
       <div class="row" style="margin-top:12px">
         <button class="btn sm" onclick="changeSetup()">Changer d'opérateur / inventaire</button>
-        <button class="btn sm" onclick="simScan()">🧪 Simuler un scan</button>
+        <button class="btn sm" id="optSim" onclick="simScan()">🧪 Simuler un scan</button>
       </div>
       <button class="btn sm dark" style="width:100%;margin-top:8px" onclick="showExpected()">📋 Articles attendus dans ce dépôt</button>
       <div id="expBox" class="hidden" style="margin-top:10px">
@@ -347,7 +363,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
       </div>
       <div style="min-width:280px">
         <h4 style="margin:6px 0">👤 Opérateurs</h4>
-        <div class="row"><input id="rOpNew" type="text" placeholder="Prénom"><input id="rOpCode" type="text" inputmode="numeric" maxlength="6" value="1234" style="max-width:90px"><button class="btn pri" style="flex:0" onclick="addOp()">Ajouter</button></div>
+        <div class="row"><input id="rOpNew" type="text" placeholder="Prénom"><input id="rOpCode" type="text" inputmode="numeric" maxlength="6" value="1234" style="max-width:80px"><select id="rOpRole" style="max-width:120px"><option value="standard">Standard</option><option value="admin">Admin</option></select><button class="btn pri" style="flex:0" onclick="addOp()">Ajouter</button></div>
         <div id="rOps" class="list small" style="margin-top:8px"></div>
       </div>
     </div>
@@ -458,6 +474,7 @@ async function boot(){
   hide('login'); show('app');
   const pref = LS.get('view', window.innerWidth<800 ? 'saisie':'bureau');
   $('vFind').appendChild($('findBox')); show('findBox'); $('findClose').classList.add('hidden');
+  updateNav();
   history.replaceState({v:pref},'');
   go(pref,false);
 }
@@ -466,13 +483,14 @@ async function doLogin(){
   if(error) return toast('Identifiants incorrects','bad');
   boot();
 }
-async function logout(){ await stopScan(); await sb.auth.signOut(); location.reload(); }
+async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 18:45';
+const APP_V='v17.11 18:55';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 function go(v,push=true){
   if(!VIEWS[v]) v='saisie';
+  if(v!=='saisie' && !isAdmin()) v='saisie';
   const prev=LS.get('view'); LS.set('view',v);
   if(v!=='saisie') stopScan();
   if(v!=='test') stopTestScan();
@@ -528,7 +546,31 @@ async function initSaisie(){
   if(st.inv && st.who && st.zone && data.some(i=>i.id==st.inv) && st.active && REF.ops.some(o=>o.nom===st.who&&o.actif)){ startCount(true); }
   netState(); flushQueue();
 }
-function changeSetup(){ stopScan(); const st=LS.get('setup',{}); st.active=false; LS.set('setup',st); hide('counting'); show('setup'); }
+function changeSetup(){ stopScan(); setRole(null); const st=LS.get('setup',{}); st.active=false; LS.set('setup',st); hide('counting'); show('setup'); }
+
+/* ---- profils : admin (tous les menus) / standard (écran de scan seulement) ---- */
+let ROLE = LS.get('role', null); // {who, role}
+function isAdmin(){ return !!(ROLE && ROLE.role==='admin'); }
+function setRole(op){ ROLE = op ? {who:op.nom, role:op.role||'standard'} : null; LS.set('role',ROLE); updateNav(); }
+function updateNav(){
+  const a=isAdmin();
+  $('bnav').classList.toggle('hidden',!a);
+  document.body.classList.toggle('noadmin',!a);
+  if($('optSim')) $('optSim').classList.toggle('hidden',!a);
+}
+async function showAdmLogin(){
+  await loadRefs();
+  const admins=REF.ops.filter(o=>o.actif && o.role==='admin');
+  if(!admins.length) return toast('Aucun opérateur administrateur actif','bad');
+  $('aWho').innerHTML=admins.map(o=>`<option>${esc(o.nom)}</option>`).join('');
+  $('aPin').value=''; show('admBox'); $('admBox').scrollIntoView({behavior:'smooth',block:'center'});
+}
+function adminLogin(){
+  const op=REF.ops.find(o=>o.nom===$('aWho').value && o.actif);
+  if(!op || $('aPin').value!==String(op.code)){ $('aPin').value=''; return toast('Code incorrect','bad'); }
+  if(op.role!=='admin') return toast('Cet opérateur n\'est pas administrateur','bad');
+  $('aPin').value=''; hide('admBox'); setRole(op); go('bureau');
+}
 /* ---- mémoire des dépôts (dernier emplacement connu) ---- */
 let MEM = new Map(); // ean -> [{depot,qte,vu,inv}] trié du plus récent au plus ancien
 async function loadMem(){
@@ -591,6 +633,7 @@ async function startCount(silent){
     const op=REF.ops.find(o=>o.nom===who);
     if(!op || $('sPin').value!==String(op.code)){ $('sPin').value=''; return toast('Code opérateur incorrect','bad'); }
   }
+  setRole(REF.ops.find(o=>o.nom===who));
   $('sPin').value='';
   const rack0 = st0.zone===zone ? (st0.rack||'') : '';
   LS.set('setup',{inv,who,zone,rack:rack0,active:true});
@@ -1220,7 +1263,8 @@ async function showRefs(){
       <button class="btn sm" onclick="renRef('depots',${d.id},this.dataset.n)" data-n="${esc(d.nom)}">Renommer</button>
       <button class="btn sm ${d.actif?'red':''}" onclick="togRef('depots',${d.id},${!d.actif})">${d.actif?'Désactiver':'Réactiver'}</button></div>`).join('') : '<div class="muted">Aucun dépôt</div>';
   $('rOps').innerHTML = REF.ops.length ? REF.ops.map(o=>`<div class="it">
-      <div class="t"><div><b style="${o.actif?'':'text-decoration:line-through;opacity:.6'}">${esc(o.nom)}</b> <span class="muted">code ${esc(o.code)}</span></div></div>
+      <div class="t"><div><b style="${o.actif?'':'text-decoration:line-through;opacity:.6'}">${esc(o.nom)}</b> <span class="pill ${o.role==='admin'?'warn':''}">${o.role==='admin'?'Admin':'Standard'}</span> <span class="muted">code ${esc(o.code)}</span></div></div>
+      <button class="btn sm" onclick="roleOp(${o.id},'${o.role==='admin'?'standard':'admin'}')">${o.role==='admin'?'→ Standard':'→ Admin'}</button>
       <button class="btn sm" onclick="renRef('operateurs',${o.id},this.dataset.n)" data-n="${esc(o.nom)}">Renommer</button>
       <button class="btn sm" onclick="codeOp(${o.id})">Code</button>
       <button class="btn sm ${o.actif?'red':''}" onclick="togRef('operateurs',${o.id},${!o.actif})">${o.actif?'Désactiver':'Réactiver'}</button></div>`).join('') : '<div class="muted">Aucun opérateur — ajoutez au moins une personne.</div>';
@@ -1232,8 +1276,8 @@ async function addDepot(){
   $('rDepNew').value=''; showRefs();
 }
 async function addOp(){
-  const nom=$('rOpNew').value.trim(), code=$('rOpCode').value.trim()||'1234'; if(!nom) return;
-  const {error}=await sb.from('operateurs').insert({nom,code}); if(error) return refErr(error);
+  const nom=$('rOpNew').value.trim(), code=$('rOpCode').value.trim()||'1234', role=$('rOpRole').value; if(!nom) return;
+  const {error}=await sb.from('operateurs').insert({nom,code,role}); if(error) return refErr(error);
   $('rOpNew').value=''; $('rOpCode').value='1234'; showRefs();
 }
 async function renRef(table,id,old){
@@ -1267,6 +1311,12 @@ function compactRacks(r){
   const parts=[];
   Object.entries(g).forEach(([P,n])=>{ n.sort((a,b)=>a-b); if(n.every((v,i)=>v===i+1)) parts.push(P+':'+n.length); else n.forEach(i=>parts.push(P+'-'+i)); });
   return parts.concat(other).join(', ');
+}
+async function roleOp(id,role){
+  if(role==='standard' && REF.ops.filter(o=>o.actif&&o.role==='admin'&&o.id!==id).length===0) return toast('Il faut garder au moins un administrateur','bad');
+  const {error}=await sb.from('operateurs').update({role}).eq('id',id); if(error) return refErr(error);
+  const o=REF.ops.find(x=>x.id===id); if(o && ROLE && ROLE.who===o.nom){ o.role=role; setRole(o); if(!isAdmin()) go('saisie'); }
+  showRefs();
 }
 async function codeOp(id){
   const code=prompt('Nouveau code (4 à 6 chiffres) :','1234'); if(!code) return;
