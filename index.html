@@ -315,14 +315,18 @@ body.noadmin #toast{bottom:24px!important}
         <input id="aQty" type="number" inputmode="numeric" value="1" min="0">
         <button onclick="bump(1)">+</button>
       </div>
-      <button class="btn pri" style="width:100%;padding:16px;font-size:17px" onclick="saveCount()">✔ Enregistrer</button>
+      <button class="btn pri" id="btnSave" style="width:100%;padding:16px;font-size:17px" onclick="saveCount('add')">✔ Enregistrer</button>
+      <div class="row hidden" id="saveChoice" style="gap:8px">
+        <button class="btn pri" style="padding:16px 6px;font-size:16px" onclick="saveCount('add')" id="btnAdd">➕ Ajouter</button>
+        <button class="btn dark" style="padding:16px 6px;font-size:16px" onclick="saveCount('replace')" id="btnReplace">♻️ Remplacer</button>
+      </div>
     </div>
 
     <div class="card" id="bottomCard">
       <div class="row"><b id="listTitle">Articles comptés</b><span class="muted small" style="text-align:right" id="myTotal"></span></div>
       <div id="mine" class="list small"></div>
       <div id="recBox" class="hidden">
-        <div class="small" style="margin:4px 0 8px;padding:8px 10px;background:#fff4cc;border-radius:8px">🔁 <b>Recomptage lancé par l'admin</b> — articles en écart (compté ≠ stock), classés par rack puis par libellé. Chaque saisie remplace le premier comptage (qui reste conservé). <span id="recN"></span></div>
+        <div class="small" style="margin:4px 0 8px;padding:8px 10px;background:#fff4cc;border-radius:8px">🔁 <b>Recomptage lancé par l'admin</b> — articles à recompter, classés par rack puis par libellé. Comptez ce que vous voyez : la quantité attendue n'est volontairement pas affichée. <span id="recN"></span></div>
         <div class="list small" id="recList"></div>
       </div>
     </div>
@@ -532,7 +536,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 23:05';
+const APP_V='v17.11 23:30';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -769,17 +773,32 @@ function dupInfo(ean){
   return {rec,total,mineQ:mineHere.reduce((s,c)=>s+Number(c.qte),0),others:Object.values(groups),lastMine,theo:a?Number(a.qte_theorique)||0:null};
 }
 const hhmm=t=>new Date(t).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+function prevCounts(ean){
+  const rec=isRec(ean);
+  return S.allC.filter(c=>c.ean===ean && !!c.recomptage===rec)
+    .concat(Q.filter(c=>c.inventaire_id===S.inv && c.ean===ean && !!c.recomptage===rec).map(c=>({...c,_p:1})))
+    .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+}
+// « au même endroit » = même dépôt, et même rack si un rack est choisi
+const samePlace=c=>c.zone===S.zone && (!S.rack || (c.rack||'')===S.rack);
 function renderDup(ean){
-  const d=dupInfo(ean); const out=[];
-  if(d.others.length){
-    out.push(`<div class="dupw"><b>⚠ Déjà compté ${d.rec?'(recomptage) ':''}ailleurs :</b><br>${d.others.map(g=>`${fmt(g.qte)} par ${esc(g.who)} — ${esc(g.zone)} à ${hhmm(g.t)}`).join('<br>')}<div class="small" style="margin-top:4px">Si c'est la même pile, ne la recomptez pas. Si le stock est réparti dans plusieurs zones, c'est normal.</div></div>`);
+  const out=[], rec=isRec(ean), prev=prevCounts(ean), here=prev.filter(samePlace);
+  if(prev.length){
+    out.push(`<div class="dupw"><b>⚠ Déjà ${rec?'recompté':'compté'} :</b><br>${prev.map(c=>
+      `${fmt(c.qte)} à <b>${hms(c.created_at)}</b> par ${esc(c.compteur||'?')} — ${esc(lieu(c.zone,c.rack))}${samePlace(c)?' <b>(ici)</b>':''}${c._p?' (en attente)':''}`).join('<br>')}
+      <div class="small" style="margin-top:4px">${here.length?'<b>➕ Ajouter</b> : s\'ajoute aux saisies existantes · <b>♻️ Remplacer</b> : remplace la/les saisie(s) faite(s) ici.':'Compté ailleurs : si le stock est réparti dans plusieurs emplacements, ajoutez ; sinon, ne le recomptez pas.'}</div></div>`);
   }
-  const kn=known(ean,S.inv);
-  if(kn.length) out.push(`<div class="small" style="margin:2px 0 6px">📍 Habituellement : <b>${esc(knownTxt(kn.slice(0,3)))}</b></div>`);
-  if(d.mineQ) out.push(`<span class="pill blue">Déjà saisi par vous ici : ${fmt(d.mineQ)}</span> `);
-  if(d.theo!=null && d.total>0) out.push(`<span class="pill ${d.total>d.theo?'bad':d.total===d.theo?'ok':''}">Compté au total : ${fmt(d.total)} / stock ${fmt(d.theo)}</span>`);
+  if(!rec){
+    const kn=known(ean,S.inv);
+    if(kn.length) out.push(`<div class="small" style="margin:2px 0 6px">📍 Habituellement : <b>${esc(knownTxt(kn.slice(0,3)))}</b></div>`);
+  } else if(!recItems().some(x=>x.a.ean===ean)) {
+    out.push(`<div class="small" style="margin:2px 0 6px;color:var(--warn)"><b>ℹ️ Cet article n'est pas dans la liste à recompter.</b></div>`);
+  }
   $('aDup').innerHTML=out.join('');
-  return d;
+  $('btnSave').classList.toggle('hidden',!!prev.length);
+  $('saveChoice').classList.toggle('hidden',!prev.length);
+  $('btnReplace').classList.toggle('hidden',!here.length);
+  return {prev,here};
 }
 
 /* ---- marques & logos ---- */
@@ -873,8 +892,8 @@ function renderRecList(){
     const h = head!==lastHead ? `<div class="small" style="margin:8px 0 2px;font-weight:800;color:#7a5b00">${esc(head)}</div>` : ''; lastHead=head;
     const ec = x.c1-x.theo;
     return h+`<div class="it" style="${x.done?'opacity:.55':''}" onclick="openArt('${esc(x.a.ean)}')"><span class="brandsm">${brandHtml(brandOf(x.a))}</span>
-      <div class="t"><div><b>${esc(x.a.designation)}</b></div><div class="muted">${x.a.reference?'Réf. '+esc(x.a.reference)+' · ':''}stock ${fmt(x.theo)} · compté ${x.counted?fmt(x.c1):'—'}${x.done?' · recompté '+fmt(x.rc):''}</div></div>
-      <span class="pill ${x.done?'ok':ec<0?'bad':'warn'}">${x.done?'✓':(ec>0?'+':'')+fmt(ec)}</span></div>`; }).join('')
+      <div class="t"><div><b>${esc(x.a.designation)}</b></div><div class="muted">${x.a.reference?'Réf. '+esc(x.a.reference)+' · ':''}${esc(x.depot?lieu(x.depot,x.rack):'emplacement inconnu')}</div></div>
+      <span class="pill ${x.done?'ok':'warn'}">${x.done?'✓ fait':'à recompter'}</span></div>`; }).join('')
     : '<div class="muted" style="padding:8px 0">Aucun écart 👍</div>';
 }
 async function loadMine(){
@@ -941,7 +960,7 @@ function searchArt(){
   const q=$('q').value; const box=$('res');
   if(q.trim().length<2){box.innerHTML='';return;}
   const all=S.arts.filter(a=>matchArt(a,q)), r=all.slice(0,50);
-  box.innerHTML = (all.length>r.length?`<div class="muted small" style="padding:4px 0">${all.length} résultats — affinez la recherche</div>`:'') + (r.length? r.map(a=>`<div class="it" onclick="openArt('${esc(a.ean)}')"><span class="brandsm">${brandHtml(brandOf(a))}</span><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${esc(a.ean)}${a.reference?' · '+esc(a.reference):''}</div></div><span class="pill">stock ${fmt(a.qte_theorique)}</span></div>`).join('') : '<div class="muted" style="padding:8px 0">Aucun résultat</div>');
+  box.innerHTML = (all.length>r.length?`<div class="muted small" style="padding:4px 0">${all.length} résultats — affinez la recherche</div>`:'') + (r.length? r.map(a=>`<div class="it" onclick="openArt('${esc(a.ean)}')"><span class="brandsm">${brandHtml(brandOf(a))}</span><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${esc(a.ean)}${a.reference?' · '+esc(a.reference):''}</div></div>${$('recMode').checked?'':`<span class="pill">stock ${fmt(a.qte_theorique)}</span>`}</div>`).join('') : '<div class="muted" style="padding:8px 0">Aucun résultat</div>');
 }
 
 /* scan : moteur ZXing-C++ (WebAssembly) via l'API BarcodeDetector — bien plus fiable que l'ancien moteur sur les EAN */
@@ -1262,15 +1281,22 @@ function resumeScan(){
   else { $('reader').innerHTML=''; $('btnScan').scrollIntoView({behavior:'smooth',block:'center'}); }
 }
 function bump(d){ const i=$('aQty'); i.value=Math.max(0,(+i.value||0)+d); }
-$('aQty').addEventListener('keydown',e=>{if(e.key==='Enter')saveCount()});
-function saveCount(){
+$('aQty').addEventListener('keydown',e=>{if(e.key==='Enter'){ if(!$('btnSave').classList.contains('hidden')) saveCount('add'); else $('btnAdd').focus(); }});
+async function saveCount(mode='add'){
   const q=+$('aQty').value; if(isNaN(q)||q<0) return toast('Quantité invalide','bad');
-  const d=dupInfo(S.cur);
-  if(d.lastMine){
-    const s=Math.round((Date.now()-new Date(d.lastMine.created_at))/1000);
-    if(s<60 && !confirm(`Vous avez déjà saisi ${fmt(d.lastMine.qte)} pour cet article il y a ${s} s.\n\nAjouter encore ${fmt(q)} (total ${fmt(d.mineQ+q)}) ?`)) return;
+  const ean=S.cur;
+  if(mode==='replace'){
+    const here=prevCounts(ean).filter(samePlace);
+    const ids=here.filter(c=>!c._p&&c.id).map(c=>c.id);
+    if(ids.length){
+      const {error}=await sb.from('comptages').delete().in('id',ids);
+      if(error) return toast(/CLOTURE/.test(error.message)?'Inventaire clôturé : modification refusée':'Remplacement impossible : '+error.message,'bad');
+      S.allC=S.allC.filter(c=>!ids.includes(c.id)); S.mine=S.mine.filter(c=>!ids.includes(c.id));
+    }
+    Q=Q.filter(c=>!(c.inventaire_id===S.inv && c.ean===ean && !!c.recomptage===isRec(ean) && samePlace(c))); LS.set('queue',Q);
   }
-  addCount(S.cur,q); toast(`${fmt(q)} × ${artLabel(S.cur)}`,'ok');
+  addCount(ean,q);
+  toast(`${mode==='replace'?'♻️ Remplacé : ':''}${fmt(q)} × ${artLabel(ean)}`,'ok');
   hide('artCard'); S.cur=null; resumeScan();
 }
 function addCount(ean,qte){
