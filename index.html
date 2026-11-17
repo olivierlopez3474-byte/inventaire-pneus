@@ -503,7 +503,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 19:20';
+const APP_V='v17.11 19:30';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 function go(v,push=true){
@@ -890,8 +890,9 @@ function eanCheck(s){ // contrôle de la clé EAN-8 / UPC-A (12) / EAN-13 / 14
 }
 function onTestScan(txt, result){
   const fmtName = result?.result?.format?.formatName || result?.format?.formatName || '';
-  if(TESTS[0] && TESTS[0].raw===txt && Date.now()-TESTS[0].t<1500) return;
-  TESTS.unshift({raw:String(txt),format:fmtName,t:Date.now()}); TESTS=TESTS.slice(0,10);
+  const now=Date.now();
+  if(TESTS[0] && TESTS[0].raw===txt && now-(TESTS[0].seen||TESTS[0].t)<1500){ TESTS[0].seen=now; return; } // toujours dans le champ
+  TESTS.unshift({raw:String(txt),format:fmtName,t:now,seen:now}); TESTS=TESTS.slice(0,10);
   beep(true); renderTest();
 }
 // Essaie la détection sur une image à plusieurs tailles (0 = taille d'origine)
@@ -951,7 +952,7 @@ function renderTest(){
 }
 function onScan(txt){
   const now=Date.now(); const k=keyEan(txt);
-  if(k===S.lastCode && now-S.lastT<1800) return;
+  if(k===S.lastCode && now-S.lastT<1500){ S.lastT=now; return; } // toujours dans le champ : on ignore
   S.lastCode=k; S.lastT=now;
   const a=S.byEan.get(k);
   const d=dupInfo(k);
@@ -1018,7 +1019,7 @@ function simScan(){
   const a=S.arts[Math.floor(Math.random()*S.arts.length)]; S.lastCode=''; onScan(a.ean);
 }
 function closeArt(){ hide('artCard'); S.cur=null; resumeScan(); }
-function resumeScan(){ if(S.cam && S.scanning) S.cam.resume(); }
+function resumeScan(){ S.lastT=Date.now(); if(S.cam && S.scanning) S.cam.resume(); }
 function bump(d){ const i=$('aQty'); i.value=Math.max(0,(+i.value||0)+d); }
 $('aQty').addEventListener('keydown',e=>{if(e.key==='Enter')saveCount()});
 function saveCount(){
