@@ -578,7 +578,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v18.11 02:25';
+const APP_V='v18.11 02:30';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -1643,14 +1643,14 @@ function cols(){
   const dcol={k:'last',l:'Dernière saisie',f:r=>r.last?`<span style="white-space:nowrap">${dtf(r.last)}</span>`:'<span class="muted">—</span>'};
   const ec=n('ecart','Écart',r=>`<span class="${r.ecart<0?'neg':r.ecart>0?'pos':''}">${r.ecart>0?'+':''}${fmt(r.ecart)}</span>`);
   switch(B.tab){
-    case 'ecarts': return [sel,...base,n('theo','Stock'),n('compte1','Compté'),n('recompte','Recompté'),ec,n('valEcart','Écart €',r=>eur(r.valEcart)),{k:'zones',l:'Compté dans',f:r=>esc(r.lieux.join(', '))},{k:'lastDep',l:'Dernier dépôt connu',f:r=>esc(r.knownTxt)||'<span class="muted">—</span>'},{k:'rec',l:'',f:r=>r.rec?'<span class="pill warn">à recompter</span>':''},dcol];
+    case 'ecarts': return [sel,...base,dcol,n('theo','Stock'),n('compte1','Compté'),n('recompte','Recompté'),ec,n('valEcart','Écart €',r=>eur(r.valEcart)),{k:'zones',l:'Compté dans',f:r=>esc(r.lieux.join(', '))},{k:'lastDep',l:'Dernier dépôt connu',f:r=>esc(r.knownTxt)||'<span class="muted">—</span>'},{k:'rec',l:'',f:r=>r.rec?'<span class="pill warn">à recompter</span>':''}];
     case 'noncpt': return [sel,...base,n('theo','Stock'),n('prix','Prix HT',r=>eur(r.prix)),{k:'lastDep',l:'Dernier dépôt connu',f:r=>esc(r.knownTxt)||'<span class="muted">—</span>'},{k:'rec',l:'',f:r=>r.rec?'<span class="pill warn">à recompter</span>':''}];
-    case 'nonref': return [{k:'ean',l:'Code scanné'},n('compte','Qté comptée'),{k:'zones',l:'Zones',f:r=>esc(r.zones.join(', '))},{k:'compteurs',l:'Par',f:r=>esc(r.compteurs.join(', '))},dcol];
-    case 'doublons': return [sel,...base,n('theo','Stock'),n('compte1','1er comptage'),n('recompte','Recompté',r=>r.recompte==null?'<span class="muted">—</span>':fmt(r.recompte)),ec,
-      {k:'why',l:'Pourquoi c\'est signalé',f:dupWhy},{k:'det',l:'Où, combien, qui, quand',f:dupDet},dcol];
-    case 'recompt': return [sel,...base,n('theo','Stock'),n('compte1','1er comptage'),n('recompte','Recompté'),n('ecart','Écart final',ec.f),{k:'zones',l:'Compté dans',f:r=>esc(r.lieux.join(', '))},{k:'lastDep',l:'Dernier dépôt connu',f:r=>esc(r.knownTxt)||'<span class="muted">—</span>'},{k:'st',l:'État',f:r=>r.recompte!=null?'<span class="pill ok">recompté</span>':'<span class="pill warn">en attente</span>'},dcol];
+    case 'nonref': return [{k:'ean',l:'Code scanné'},dcol,n('compte','Qté comptée'),{k:'zones',l:'Zones',f:r=>esc(r.zones.join(', '))},{k:'compteurs',l:'Par',f:r=>esc(r.compteurs.join(', '))}];
+    case 'doublons': return [sel,...base,dcol,n('theo','Stock'),n('compte1','1er comptage'),n('recompte','Recompté',r=>r.recompte==null?'<span class="muted">—</span>':fmt(r.recompte)),ec,
+      {k:'why',l:'Pourquoi c\'est signalé',f:dupWhy},{k:'det',l:'Où, combien, qui, quand',f:dupDet}];
+    case 'recompt': return [sel,...base,dcol,n('theo','Stock'),n('compte1','1er comptage'),n('recompte','Recompté'),n('ecart','Écart final',ec.f),{k:'zones',l:'Compté dans',f:r=>esc(r.lieux.join(', '))},{k:'lastDep',l:'Dernier dépôt connu',f:r=>esc(r.knownTxt)||'<span class="muted">—</span>'},{k:'st',l:'État',f:r=>r.recompte!=null?'<span class="pill ok">recompté</span>':'<span class="pill warn">en attente</span>'}];
     case 'anomalies': return [...base,n('theo','Stock'),{k:'pb',l:'Problème',f:r=>[r.negTheo?'<span class="pill bad">stock négatif</span>':'',(!r.art||!r.art.ean||r.ean.startsWith('LIGNE'))?'<span class="pill warn">sans EAN</span>':''].join(' ')},n('compte','Compté')];
-    case 'tout': return [sel,...base,n('theo','Stock'),n('compte1','Compté'),n('recompte','Recompté'),ec,n('prix','Prix HT',r=>eur(r.prix)),n('valEcart','Écart €',r=>eur(r.valEcart)),{k:'zones',l:'Compté dans',f:r=>esc(r.lieux.join(', '))},{k:'lastDep',l:'Dernier dépôt connu',f:r=>esc(r.knownTxt)||'<span class="muted">—</span>'},dcol];
+    case 'tout': return [sel,...base,dcol,n('theo','Stock'),n('compte1','Compté'),n('recompte','Recompté'),ec,n('prix','Prix HT',r=>eur(r.prix)),n('valEcart','Écart €',r=>eur(r.valEcart)),{k:'zones',l:'Compté dans',f:r=>esc(r.lieux.join(', '))},{k:'lastDep',l:'Dernier dépôt connu',f:r=>esc(r.knownTxt)||'<span class="muted">—</span>'}];
     case 'horsf': return [...base,{k:'marque',l:'Marque',f:r=>esc(r.art?.marque||'')},n('compte','Compté'),{k:'zones',l:'Compté dans',f:r=>esc(r.lieux.join(', '))},{k:'compteurs',l:'Par',f:r=>esc(r.compteurs.join(', '))},{k:'h',l:'Heure',f:r=>r.c.length?new Date(r.c.map(c=>c.created_at).sort().pop()).toLocaleString('fr-FR'):''}];
     case 'saisies': return [{k:'created_at',l:'Date',f:c=>new Date(c.created_at).toLocaleString('fr-FR')},{k:'compteur',l:'Par'},{k:'zone',l:'Dépôt'},{k:'rack',l:'Rack'},{k:'ean',l:'EAN'},{k:'_des',l:'Désignation',f:c=>{const a=B.rows.find(r=>r.ean===c.ean);return esc(a?a.des:'')}},n('qte','Qté'),{k:'recomptage',l:'Type',f:c=>(c.recomptage?'<span class="pill warn">recomptage</span>':'comptage')+(c.source==='manuel'?' <span class="pill">✋ manuel</span>':' 📷')},{k:'_x',l:'',f:c=>`<div style="display:flex;gap:6px;white-space:nowrap"><button class="btn sm" onclick="bEdit(${c.id})" title="Corriger la quantité">✏️</button><button class="btn sm red" onclick="bDel(${c.id})" title="Supprimer la saisie">✕</button></div>`}];
   }
