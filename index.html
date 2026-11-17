@@ -204,6 +204,11 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
         <button class="btn sm" onclick="changeSetup()">Changer d'opérateur / inventaire</button>
         <button class="btn sm" onclick="simScan()">🧪 Simuler un scan</button>
       </div>
+      <button class="btn sm dark" style="width:100%;margin-top:8px" onclick="showExpected()">📋 Articles attendus dans ce dépôt</button>
+      <div id="expBox" class="hidden" style="margin-top:10px">
+        <div class="small muted" id="expHead"></div>
+        <div class="list small res" id="expList"></div>
+      </div>
     </div>
 
     <div id="recBox" class="card hidden">
@@ -338,6 +343,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
       <div id="anaHelp" class="help"></div>
       <div class="toolbar">
         <input type="search" id="fTxt" placeholder="Filtrer…" oninput="renderAna()">
+        <select id="fDep" style="max-width:220px" onchange="B.sel.clear();renderTabs();renderAna()"><option value="">Tous les dépôts</option></select>
         <span id="anaActions"></span>
         <span style="flex:1"></span>
         <button class="btn sm" onclick="refreshBureau()">↻ Actualiser</button>
@@ -393,10 +399,10 @@ function beep(ok=true){ // true = OK, false = inconnu, 'warn' = doublon possible
     setTimeout(()=>c.close(),1500);}catch(e){}
   if(navigator.vibrate) navigator.vibrate(ok==='warn'?[150,80,150,80,150]:ok?60:[80,60,80]);
 }
-async function fetchAll(table, cols, filt){
+async function fetchAll(table, cols, filt, orderCol='id'){
   let out=[],from=0,step=1000;
   for(;;){
-    let q = sb.from(table).select(cols).range(from,from+step-1).order('id');
+    let q = sb.from(table).select(cols).range(from,from+step-1).order(orderCol);
     q = filt(q);
     const {data,error} = await q; if(error) throw error;
     out = out.concat(data); if(data.length<step) break; from+=step;
@@ -455,6 +461,24 @@ async function initSaisie(){
   netState(); flushQueue();
 }
 function changeSetup(){ stopScan(); const st=LS.get('setup',{}); st.active=false; LS.set('setup',st); hide('counting'); show('setup'); }
+/* ---- mémoire des dépôts (dernier emplacement connu) ---- */
+let MEM = new Map(); // ean -> [{depot,qte,vu,inv}] trié du plus récent au plus ancien
+async function loadMem(){
+  try{
+    const rows = await fetchAll('article_depots','ean,depot,derniere_qte,vu_le,inventaire_id',q=>q,'ean');
+    LS.set('mem',rows); setMem(rows);
+  }catch(e){ setMem(LS.get('mem',[])); }
+}
+function setMem(rows){
+  MEM=new Map();
+  rows.forEach(r=>{ const l=MEM.get(r.ean)||[]; l.push({depot:r.depot,qte:Number(r.derniere_qte),vu:r.vu_le,inv:r.inventaire_id}); MEM.set(r.ean,l); });
+  MEM.forEach(l=>l.sort((a,b)=>new Date(b.vu)-new Date(a.vu)));
+}
+// Emplacements connus d'un article lors des inventaires PRÉCÉDENTS (hors inventaire en cours)
+function known(ean,invId){ return (MEM.get(ean)||[]).filter(m=>m.inv!==invId); }
+const dshort=t=>new Date(t).toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'});
+function knownTxt(list){ return list.map(m=>`${m.depot} (${fmt(m.qte)} · ${dshort(m.vu)})`).join(', '); }
+
 /* ---- dépôts & opérateurs ---- */
 let REF = LS.get('refs',{deps:[],ops:[]});
 async function loadRefs(){
@@ -494,7 +518,7 @@ async function startCount(silent){
   hide('setup'); show('counting');
   loadLogos();
   await loadArts(); await loadMine(); subscribeArts();
-  loadAllCounts();
+  loadAllCounts(); loadMem();
 }
 
 /* ---- contrôle des doublons en direct ---- */
@@ -535,6 +559,8 @@ function renderDup(ean){
   if(d.others.length){
     out.push(`<div class="dupw"><b>⚠ Déjà compté ${d.rec?'(recomptage) ':''}ailleurs :</b><br>${d.others.map(g=>`${fmt(g.qte)} par ${esc(g.who)} — ${esc(g.zone)} à ${hhmm(g.t)}`).join('<br>')}<div class="small" style="margin-top:4px">Si c'est la même pile, ne la recomptez pas. Si le stock est réparti dans plusieurs zones, c'est normal.</div></div>`);
   }
+  const kn=known(ean,S.inv);
+  if(kn.length) out.push(`<div class="small" style="margin:2px 0 6px">📍 Habituellement : <b>${esc(knownTxt(kn.slice(0,3)))}</b></div>`);
   if(d.mineQ) out.push(`<span class="pill blue">Déjà saisi par vous ici : ${fmt(d.mineQ)}</span> `);
   if(d.theo!=null && d.total>0) out.push(`<span class="pill ${d.total>d.theo?'bad':d.total===d.theo?'ok':''}">Compté au total : ${fmt(d.total)} / stock ${fmt(d.theo)}</span>`);
   $('aDup').innerHTML=out.join('');
@@ -687,6 +713,16 @@ $('q').addEventListener('keydown',e=>{
   const v=$('q').value.replace(/\s/g,'');
   if(/^\d{6,14}$/.test(v)){ e.preventDefault(); $('q').value=''; $('res').innerHTML=''; S.lastCode=''; onScan(v); }
 });
+async function showExpected(){
+  await loadMem();
+  const z=S.zone;
+  const counted=new Set(S.allC.filter(c=>c.zone===z).map(c=>c.ean).concat(Q.filter(c=>c.inventaire_id===S.inv&&c.zone===z).map(c=>c.ean)));
+  const exp=S.arts.filter(a=>known(a.ean,S.inv).some(m=>m.depot===z));
+  const todo=exp.filter(a=>!counted.has(a.ean));
+  $('expHead').innerHTML = exp.length ? `${fmt(exp.length)} article(s) vus dans <b>${esc(z)}</b> au dernier inventaire — <b>${fmt(todo.length)} pas encore comptés ici</b>` : `Aucun article n'a encore été compté dans <b>${esc(z)}</b> lors d'un inventaire précédent. La liste se remplira au fil des inventaires.`;
+  $('expList').innerHTML = todo.map(a=>{ const m=known(a.ean,S.inv).find(m=>m.depot===z); return `<div class="it" onclick="openArt('${esc(a.ean)}')"><span class="brandsm">${brandHtml(brandOf(a))}</span><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${esc(a.ean)} · dernière fois ${fmt(m.qte)} le ${dshort(m.vu)}</div></div></div>`; }).join('');
+  show('expBox');
+}
 function toggleOpt(){ $('optBox').classList.toggle('hidden'); }
 function modeBadges(){ $('cFast').classList.toggle('hidden',!$('fast').checked); $('cRec').classList.toggle('hidden',!$('recMode').checked); }
 function simScan(){
@@ -757,8 +793,10 @@ async function refreshBureau(){
   try{
     [B.arts,B.cpt] = await Promise.all([
       fetchAll('articles','*',q=>q.eq('inventaire_id',id)),
-      fetchAll('comptages','*',q=>q.eq('inventaire_id',id))
+      fetchAll('comptages','*',q=>q.eq('inventaire_id',id)),
+      loadMem(), loadRefs()
     ]);
+    fillDepFilter();
   }catch(e){ return toast(e.message,'bad'); }
   compute(); renderKpis(); renderTabs(); renderAna();
 }
@@ -796,6 +834,9 @@ function compute(){
     x.ref = x.art? x.art.reference : '';
     x.rec = x.art? x.art.a_recompter : false;
     x.negTheo = x.theo<0;
+    x.known = known(x.ean,B.inv.id);
+    x.lastDep = x.known[0]?.depot || '';
+    x.knownTxt = knownTxt(x.known);
     return x;
   });
 }
@@ -836,7 +877,7 @@ function renderKpis(){
    <div class="kpi"><div class="l">Saisies</div><div class="v">${fmt(B.cpt.length)}</div><div class="small muted">${Object.entries(who).map(([k,v])=>esc(k)+' : '+fmt(v)).join(' · ')||'—'}</div></div>`;
 }
 function renderTabs(){
-  $('subtabs').innerHTML = TABS.map(([k,l])=>`<button class="${B.tab===k?'on':''}" onclick="B.tab='${k}';B.sort=null;B.sel.clear();renderTabs();renderAna()">${l}<span class="n">${fmt(sets[k]().length)}</span></button>`).join('');
+  $('subtabs').innerHTML = TABS.map(([k,l])=>`<button class="${B.tab===k?'on':''}" onclick="B.tab='${k}';B.sort=null;B.sel.clear();renderTabs();renderAna()">${l}<span class="n">${fmt(sets[k]().filter(r=>inDep(r,$('fDep').value)).length)}</span></button>`).join('');
   $('anaHelp').textContent = TABS.find(t=>t[0]===B.tab)[2];
 }
 function cols(){
@@ -845,13 +886,13 @@ function cols(){
   const n=(k,l,f)=>({k,l,n:1,f});
   const ec=n('ecart','Écart',r=>`<span class="${r.ecart<0?'neg':r.ecart>0?'pos':''}">${r.ecart>0?'+':''}${fmt(r.ecart)}</span>`);
   switch(B.tab){
-    case 'ecarts': return [sel,...base,n('theo','Stock'),n('compte1','Compté'),n('recompte','Recompté'),ec,n('valEcart','Écart €',r=>eur(r.valEcart)),{k:'zones',l:'Zones',f:r=>esc(r.zones.join(', '))},{k:'rec',l:'',f:r=>r.rec?'<span class="pill warn">à recompter</span>':''}];
-    case 'noncpt': return [sel,...base,n('theo','Stock'),n('prix','Prix HT',r=>eur(r.prix)),{k:'rec',l:'',f:r=>r.rec?'<span class="pill warn">à recompter</span>':''}];
+    case 'ecarts': return [sel,...base,n('theo','Stock'),n('compte1','Compté'),n('recompte','Recompté'),ec,n('valEcart','Écart €',r=>eur(r.valEcart)),{k:'zones',l:'Compté dans',f:r=>esc(r.zones.join(', '))},{k:'lastDep',l:'Dernier dépôt connu',f:r=>esc(r.knownTxt)||'<span class="muted">—</span>'},{k:'rec',l:'',f:r=>r.rec?'<span class="pill warn">à recompter</span>':''}];
+    case 'noncpt': return [sel,...base,n('theo','Stock'),n('prix','Prix HT',r=>eur(r.prix)),{k:'lastDep',l:'Dernier dépôt connu',f:r=>esc(r.knownTxt)||'<span class="muted">—</span>'},{k:'rec',l:'',f:r=>r.rec?'<span class="pill warn">à recompter</span>':''}];
     case 'nonref': return [{k:'ean',l:'Code scanné'},n('compte','Qté comptée'),{k:'zones',l:'Zones',f:r=>esc(r.zones.join(', '))},{k:'compteurs',l:'Par',f:r=>esc(r.compteurs.join(', '))}];
     case 'doublons': return [sel,...base,n('theo','Stock'),n('compte','Compté'),ec,{k:'why',l:'Motif',f:r=>[r.dupFile?'<span class="pill bad">EAN en double dans le fichier</span>':'',r.zones.length>1?`<span class="pill warn">${r.zones.length} zones : ${esc(r.zones.join(', '))}</span>`:'',r.compteurs.length>1?`<span class="pill blue">${esc(r.compteurs.join(' + '))}</span>`:'',r.rapides?`<span class="pill bad">${r.rapides} saisie(s) répétée(s) &lt;20 s</span>`:''].join(' ')},{k:'det',l:'Détail',f:r=>r.c.map(c=>`${fmt(c.qte)} (${esc(c.compteur)}, ${esc(c.zone)}, ${new Date(c.created_at).toLocaleTimeString('fr-FR')})`).join('<br>')}];
-    case 'recompt': return [sel,...base,n('theo','Stock'),n('compte1','1er comptage'),n('recompte','Recompté'),n('ecart','Écart final',ec.f),{k:'st',l:'État',f:r=>r.recompte!=null?'<span class="pill ok">recompté</span>':'<span class="pill warn">en attente</span>'}];
+    case 'recompt': return [sel,...base,n('theo','Stock'),n('compte1','1er comptage'),n('recompte','Recompté'),n('ecart','Écart final',ec.f),{k:'zones',l:'Compté dans',f:r=>esc(r.zones.join(', '))},{k:'lastDep',l:'Dernier dépôt connu',f:r=>esc(r.knownTxt)||'<span class="muted">—</span>'},{k:'st',l:'État',f:r=>r.recompte!=null?'<span class="pill ok">recompté</span>':'<span class="pill warn">en attente</span>'}];
     case 'anomalies': return [...base,n('theo','Stock'),{k:'pb',l:'Problème',f:r=>[r.negTheo?'<span class="pill bad">stock négatif</span>':'',(!r.art||!r.art.ean||r.ean.startsWith('LIGNE'))?'<span class="pill warn">sans EAN</span>':''].join(' ')},n('compte','Compté')];
-    case 'tout': return [sel,...base,n('theo','Stock'),n('compte1','Compté'),n('recompte','Recompté'),ec,n('prix','Prix HT',r=>eur(r.prix)),n('valEcart','Écart €',r=>eur(r.valEcart))];
+    case 'tout': return [sel,...base,n('theo','Stock'),n('compte1','Compté'),n('recompte','Recompté'),ec,n('prix','Prix HT',r=>eur(r.prix)),n('valEcart','Écart €',r=>eur(r.valEcart)),{k:'zones',l:'Compté dans',f:r=>esc(r.zones.join(', '))},{k:'lastDep',l:'Dernier dépôt connu',f:r=>esc(r.knownTxt)||'<span class="muted">—</span>'}];
     case 'saisies': return [{k:'created_at',l:'Date',f:c=>new Date(c.created_at).toLocaleString('fr-FR')},{k:'compteur',l:'Par'},{k:'zone',l:'Zone'},{k:'ean',l:'EAN'},{k:'_des',l:'Désignation',f:c=>{const a=B.rows.find(r=>r.ean===c.ean);return esc(a?a.des:'')}},n('qte','Qté'),{k:'recomptage',l:'Type',f:c=>c.recomptage?'<span class="pill warn">recomptage</span>':'comptage'},{k:'_x',l:'',f:c=>`<button class="btn sm red" onclick="bDel(${c.id})">Supprimer</button>`}];
   }
 }
@@ -861,8 +902,16 @@ function renderActions(){
   $('anaActions').innerHTML = can ? `<button class="btn sm pri" ${B.sel.size?'':'disabled'} onclick="setRec(true)">Demander un recomptage (${B.sel.size})</button> <button class="btn sm" ${B.sel.size?'':'disabled'} onclick="setRec(false)">Retirer du recomptage</button> <button class="btn sm" onclick="selAll()">Tout cocher</button>` : '';
 }
 function selAll(){ curRows().forEach(r=>{if(r.art)B.sel.add(r.ean)}); renderAna(); }
+function fillDepFilter(){
+  const cur=$('fDep').value;
+  const names=[...new Set(REF.deps.map(d=>d.nom).concat([...MEM.values()].flat().map(m=>m.depot)))].sort();
+  $('fDep').innerHTML='<option value="">Tous les dépôts</option>'+names.map(n=>`<option ${n===cur?'selected':''}>${esc(n)}</option>`).join('');
+}
+// Un article "appartient" à un dépôt s'il y a été compté dans cet inventaire, ou s'il y était au dernier inventaire connu
+function inDep(r,d){ return !d || (r.zones||[]).includes(d) || (r.known||[]).some(m=>m.depot===d) || (B.tab==='saisies' && r.zone===d); }
 function curRows(){
   let rows=sets[B.tab]();
+  const dep=$('fDep').value; if(dep) rows=rows.filter(r=>inDep(r,dep));
   const f=norm($('fTxt').value);
   if(f) rows=rows.filter(r=>norm(Object.values(r).filter(v=>typeof v!=='object').join(' ')+' '+(r.des||'')).includes(f) || squash(r.des||'').includes(squash(f)));
   if(B.sort){ const {k,d}=B.sort; rows=[...rows].sort((a,b)=>{const x=a[k],y=b[k];return (x==null)-(y==null) || (x<y?-1:x>y?1:0)*d}); }
@@ -906,11 +955,11 @@ async function deleteInv(){
 /* ---- export ---- */
 function exportXlsx(){
   const wb=XLSX.utils.book_new();
-  const line=r=>({'EAN':r.ean,'Désignation':r.des,'Référence':r.ref,'Marque':r.art?.marque||'','Stock fichier':r.theo,'Compté':r.compte1,'Recompté':r.recompte??'','Quantité retenue':r.compte,'Écart':r.ecart,'Prix HT':r.prix??'','Écart € HT':r.valEcart??'','Zones':r.zones.join(', '),'Compteurs':r.compteurs.join(', '),'Statut':r.unknown?'Non référencé':!r.counted?'Non compté':r.ecart===0?'OK':'Écart'});
+  const line=r=>({'EAN':r.ean,'Désignation':r.des,'Référence':r.ref,'Marque':r.art?.marque||'','Stock fichier':r.theo,'Compté':r.compte1,'Recompté':r.recompte??'','Quantité retenue':r.compte,'Écart':r.ecart,'Prix HT':r.prix??'','Écart € HT':r.valEcart??'','Compté dans':r.zones.join(', '),'Dernier dépôt connu':r.knownTxt||'','Compteurs':r.compteurs.join(', '),'Statut':r.unknown?'Non référencé':!r.counted?'Non compté':r.ecart===0?'OK':'Écart'});
   const add=(name,rows)=>XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows.length?rows:[{'':'Aucune ligne'}]),name);
   add('Inventaire complet',B.rows.map(line));
   add('Écarts',sets.ecarts().map(line));
-  add('Non comptés',sets.noncpt().map(line));
+  add('Non comptés',[...sets.noncpt()].sort((x,y)=>(x.lastDep||'zzz').localeCompare(y.lastDep||'zzz')||String(x.des).localeCompare(y.des)).map(line));
   add('Non référencés',sets.nonref().map(line));
   add('Doublons',sets.doublons().map(r=>({...line(r),'Motif':[r.dupFile?'EAN double fichier':'',r.zones.length>1?'plusieurs zones':'',r.compteurs.length>1?'plusieurs compteurs':'',r.rapides?'saisies répétées <20s':''].filter(Boolean).join(', ')})));
   add('Journal saisies',B.cpt.map(c=>({'Date':new Date(c.created_at).toLocaleString('fr-FR'),'Compteur':c.compteur,'Zone':c.zone,'EAN':c.ean,'Désignation':(B.rows.find(r=>r.ean===c.ean)||{}).des,'Quantité':Number(c.qte),'Type':c.recomptage?'Recomptage':'Comptage'})));
