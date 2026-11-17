@@ -269,6 +269,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
       <select id="bInv" style="max-width:340px" onchange="loadBureau()"></select>
       <span id="bStatus"></span>
       <span style="flex:1"></span>
+      <button class="btn dark" onclick="showFinder()">🔎 Où est ce pneu ?</button>
       <button class="btn" onclick="showRefs()">👥 Dépôts & opérateurs</button>
       <button class="btn" onclick="showBrands()">🏷 Marques & logos</button>
       <button class="btn" onclick="newEmptyInv()">🧪 Inventaire vide (test)</button>
@@ -295,6 +296,19 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
         <button class="btn pri" style="flex:0;white-space:nowrap" id="iGo" onclick="doImport()">Importer et créer l'inventaire</button>
       </div>
     </div>
+  </div>
+
+  <!-- Où est ce pneu ? -->
+  <div id="findBox" class="card hidden">
+    <div class="toolbar">
+      <h3 style="margin:0">🔎 Où est ce pneu ?</h3>
+      <span style="flex:1"></span>
+      <button class="btn sm" onclick="hide('findBox')">Fermer</button>
+    </div>
+    <p class="small muted" style="margin-top:0">Cherche dans tous les inventaires : dernier dépôt connu et historique des comptages.</p>
+    <input id="fdQ" type="search" placeholder="EAN, dimension (205/55R16), modèle, référence…" oninput="finderSearch()" enterkeyhint="search">
+    <div id="fdRes" class="list small res" style="margin-top:8px"></div>
+    <div id="fdDet" style="margin-top:10px"></div>
   </div>
 
   <!-- Dépôts & opérateurs -->
@@ -798,6 +812,7 @@ async function refreshBureau(){
     ]);
     fillDepFilter();
   }catch(e){ return toast(e.message,'bad'); }
+  CAT=null; // catalogue « Où est ce pneu ? » rechargé à la prochaine ouverture
   compute(); renderKpis(); renderTabs(); renderAna();
 }
 
@@ -1034,6 +1049,54 @@ async function doImport(){
     toast(`${rows.length} articles importés`,'ok'); hide('importBox'); initBureau(inv.id);
   }catch(e){ toast('Erreur : '+e.message,'bad'); }
   $('iGo').disabled=false; $('iGo').textContent="Importer et créer l'inventaire";
+}
+
+/* ---- où est ce pneu ? (historique tous inventaires) ---- */
+let CAT=null; // catalogue de tous les articles connus (un par EAN, désignation la plus récente)
+async function showFinder(){
+  show('findBox'); $('fdQ').focus();
+  if(!CAT){
+    $('fdRes').innerHTML='<div class="muted">Chargement…</div>';
+    try{
+      const [arts]=await Promise.all([fetchAll('articles','ean,designation,reference,dimension,marque,inventaire_id',q=>q),loadMem()]);
+      const m=new Map(); arts.forEach(a=>{ const o=m.get(a.ean); if(!o||a.inventaire_id>o.inventaire_id) m.set(a.ean,a); });
+      CAT=[...m.values()];
+    }catch(e){ return toast(e.message,'bad'); }
+    $('fdRes').innerHTML='';
+  }
+  finderSearch();
+}
+function finderSearch(){
+  const q=$('fdQ').value; if(!CAT) return;
+  if(q.trim().length<2){ $('fdRes').innerHTML=''; return; }
+  const t=squash(q), k=keyEan(q), words=norm(q).split(/\s+/).filter(Boolean);
+  const r=CAT.filter(a=>{
+    if(a.ean===k) return true;
+    const hay=norm([a.designation,a.ean,a.reference,a.dimension,a.marque].join(' ')), hs=squash(hay);
+    return hs.includes(t) || words.every(w=>hay.includes(w)||hs.includes(squash(w)));
+  }).slice(0,30);
+  $('fdRes').innerHTML = r.length ? r.map(a=>{ const kn=MEM.get(a.ean)||[];
+    return `<div class="it" onclick="finderDetail('${esc(a.ean)}')"><span class="brandsm">${brandHtml(brandOf(a))}</span><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${esc(a.ean)}</div></div>${kn.length?`<span class="pill warn">📍 ${esc(kn[0].depot)}</span>`:'<span class="pill">jamais compté</span>'}</div>`; }).join('')
+    : '<div class="muted" style="padding:8px 0">Aucun article trouvé</div>';
+  if(r.length===1) finderDetail(r[0].ean);
+}
+async function finderDetail(ean){
+  const a=CAT.find(x=>x.ean===ean)||{ean,designation:ean};
+  $('fdDet').innerHTML='<div class="muted">Chargement de l\'historique…</div>';
+  const {data,error}=await sb.from('comptages').select('qte,zone,compteur,recomptage,created_at,inventaire_id').eq('ean',ean).order('created_at',{ascending:false}).limit(200);
+  if(error) return toast(error.message,'bad');
+  const invName=id=>(B.invs.find(i=>i.id===id)||{}).nom||('Inventaire '+id);
+  const kn=MEM.get(ean)||[];
+  $('fdDet').innerHTML = `<div class="card art" style="margin:0">
+    <div class="brandbig">${brandHtml(brandOf(a))}</div>
+    <h3 style="margin:0 0 4px">${esc(a.designation)}</h3>
+    <div class="small muted">EAN ${esc(ean)}${a.reference?' · réf. '+esc(a.reference):''}</div>
+    <div style="margin:12px 0 6px"><b>📍 Dernier emplacement connu</b></div>
+    ${kn.length ? kn.map((m,i)=>`<div class="small" style="padding:3px 0">${i===0?'<span class="pill warn">le plus récent</span> ':''}<b>${esc(m.depot)}</b> — ${fmt(m.qte)} pneu(s) le ${dshort(m.vu)} <span class="muted">(${esc(invName(m.inv))})</span></div>`).join('') : '<div class="small muted">Jamais compté dans un inventaire.</div>'}
+    <div style="margin:14px 0 6px"><b>🕘 Historique des comptages</b> <span class="muted small">(${data.length})</span></div>
+    ${data.length ? `<div class="tw" style="max-height:300px"><table><thead><tr><th>Date</th><th>Inventaire</th><th>Dépôt</th><th class="n">Qté</th><th>Par</th></tr></thead><tbody>${data.map(c=>`<tr><td>${new Date(c.created_at).toLocaleString('fr-FR',{dateStyle:'short',timeStyle:'short'})}</td><td>${esc(invName(c.inventaire_id))}</td><td>${esc(c.zone)}</td><td class="n">${fmt(c.qte)}</td><td>${esc(c.compteur)}${c.recomptage?' <span class="pill warn">recompt.</span>':''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="small muted">Aucun comptage.</div>'}
+  </div>`;
+  $('fdDet').scrollIntoView({behavior:'smooth',block:'start'});
 }
 
 /* ---- dépôts & opérateurs (bureau) ---- */
