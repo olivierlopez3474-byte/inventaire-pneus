@@ -71,6 +71,9 @@ label.f{display:block;font-size:12px;color:var(--mute);margin:10px 0 4px;text-tr
 .camok{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;color:#fff;font-weight:800;font-size:20px;text-shadow:0 1px 4px #000}
 .frozen{min-height:60px;background:var(--ok)}
 .bigcode{font:800 24px/1.2 ui-monospace,Menlo,Consolas,monospace;letter-spacing:1px;margin-bottom:4px;word-break:break-all}
+.btn.mic{flex:0 0 auto;padding:8px 12px;font-size:18px;margin-left:6px}
+.btn.mic.on{background:var(--bad);color:#fff;animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.6}}
 .camtap{position:absolute;left:0;right:0;bottom:8px;text-align:center;color:#fff;font-size:12px;text-shadow:0 1px 3px #000;pointer-events:none}
 .camdbg{margin-top:8px;padding:8px;border:1px dashed var(--line);border-radius:10px;background:#fff;font:11px/1.4 ui-monospace,Menlo,monospace;color:#444}
 .camdbg canvas{max-width:100%;display:block;margin-bottom:6px;border:1px solid #ddd}
@@ -511,7 +514,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 20:15';
+const APP_V='v17.11 20:25';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 function go(v,push=true){
@@ -1607,6 +1610,43 @@ let deferredInstall;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstall=e;show('btnInstall')});
 async function installApp(){ if(!deferredInstall) return; deferredInstall.prompt(); await deferredInstall.userChoice; deferredInstall=null; hide('btnInstall'); }
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+
+// Pas de correction orthographique / majuscule automatique / suggestions dans les champs (codes, dimensions, références)
+function noAutoCorrect(root=document){
+  root.querySelectorAll('input[type=text],input[type=search],input:not([type]),input[type=email],textarea').forEach(el=>{
+    el.setAttribute('autocorrect','off'); el.setAttribute('autocapitalize','off');
+    el.setAttribute('spellcheck','false'); if(el.type!=='email') el.setAttribute('autocomplete','off');
+  });
+}
+noAutoCorrect();
+document.addEventListener('focusin',e=>{ if(e.target.matches&&e.target.matches('input,textarea')) noAutoCorrect(e.target.parentNode||document); });
+
+/* ---- recherche vocale (🎤) : Chrome Android, Safari iOS ---- */
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+function speechToQuery(t){
+  return String(t).toLowerCase()
+    .replace(/\b(slash|barre|sur)\b/g,' ').replace(/\b(virgule|tiret)\b/g,' ')
+    .replace(/\bair\b/g,'r').replace(/\bpilote?\b/g,'pil').replace(/\bsport\b/g,'spo').replace(/\b(\d{3})\s*(\d{2})\s*r?\s*(\d{2})\b/g,'$1/$2R$3')
+    .replace(/\s+/g,' ').trim();
+}
+function micFor(inputId, onDone){
+  if(!SR) return;
+  const inp=$(inputId); if(!inp || inp.dataset.mic) return; inp.dataset.mic='1';
+  const b=document.createElement('button'); b.type='button'; b.className='btn mic'; b.textContent='🎤'; b.title='Recherche vocale';
+  const wrap=document.createElement('div'); wrap.style.cssText='display:flex;align-items:center;gap:0';
+  inp.parentNode.insertBefore(wrap,inp); wrap.appendChild(inp); wrap.appendChild(b); inp.style.flex='1';
+  let rec=null;
+  b.onclick=()=>{
+    if(rec){ rec.stop(); return; }
+    rec=new SR(); rec.lang='fr-FR'; rec.interimResults=true; rec.maxAlternatives=1;
+    b.classList.add('on'); b.textContent='⏺';
+    rec.onresult=e=>{ const t=[...e.results].map(r=>r[0].transcript).join(' '); inp.value=speechToQuery(t); onDone(); };
+    rec.onerror=e=>{ if(e.error!=='aborted'&&e.error!=='no-speech') toast('Micro : '+(e.error==='not-allowed'?'autorisez le micro dans les réglages':e.error),'bad'); };
+    rec.onend=()=>{ rec=null; b.classList.remove('on'); b.textContent='🎤'; };
+    try{ rec.start(); }catch(e){ rec=null; b.classList.remove('on'); b.textContent='🎤'; }
+  };
+}
+micFor('q',searchArt); micFor('fdQ',finderSearch);
 
 boot();
 </script>
