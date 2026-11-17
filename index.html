@@ -171,11 +171,13 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
     <h3 style="margin-top:0">Avant de commencer</h3>
     <label class="f">Inventaire</label>
     <select id="sInv"></select>
-    <label class="f">Votre prénom</label>
-    <input id="sWho" type="text" placeholder="ex. Sophie">
-    <label class="f">Zone comptée</label>
-    <input id="sZone" type="text" placeholder="ex. Réserve A, Rayon 2, Mezzanine…" list="zonesList">
-    <datalist id="zonesList"></datalist>
+    <label class="f">Opérateur</label>
+    <select id="sWho"></select>
+    <label class="f">Code opérateur</label>
+    <input id="sPin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="••••" autocomplete="off">
+    <label class="f">Dépôt compté</label>
+    <select id="sZone"></select>
+    <div id="sRefHelp" class="help hidden" style="margin-top:10px">Aucun opérateur ou dépôt : créez-les depuis l'écran Bureau du PC (bouton « 👥 Dépôts & opérateurs »).</div>
     <button class="btn pri" style="width:100%;margin-top:16px" onclick="startCount()">Commencer le comptage</button>
   </div>
 
@@ -184,7 +186,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
       <div class="ctx">
         <span class="pill" id="cInv"></span>
         <span class="pill blue" id="cWho"></span>
-        <span class="pill warn" id="cZone"></span>
+        <select id="cZone" class="pill warn" style="width:auto;border:0;padding:4px 8px" onchange="switchDepot(this.value)"></select>
         <span class="pill bad hidden" id="cPend"></span>
         <span style="flex:1"></span>
         <button class="btn sm" onclick="changeSetup()">Changer</button>
@@ -263,6 +265,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
       <select id="bInv" style="max-width:340px" onchange="loadBureau()"></select>
       <span id="bStatus"></span>
       <span style="flex:1"></span>
+      <button class="btn" onclick="showRefs()">👥 Dépôts & opérateurs</button>
       <button class="btn" onclick="showBrands()">🏷 Marques & logos</button>
       <button class="btn" onclick="newEmptyInv()">🧪 Inventaire vide (test)</button>
       <button class="btn pri" onclick="showImport()">＋ Nouvel inventaire (import Excel)</button>
@@ -286,6 +289,28 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
         <button class="btn pri" style="flex:0;white-space:nowrap" id="iGo" onclick="doImport()">Importer et créer l'inventaire</button>
       </div>
     </div>
+  </div>
+
+  <!-- Dépôts & opérateurs -->
+  <div id="refBox" class="card hidden">
+    <div class="toolbar">
+      <h3 style="margin:0">Dépôts & opérateurs</h3>
+      <span style="flex:1"></span>
+      <button class="btn sm" onclick="hide('refBox')">Fermer</button>
+    </div>
+    <div class="row" style="align-items:flex-start;flex-wrap:wrap">
+      <div style="min-width:280px">
+        <h4 style="margin:6px 0">📍 Dépôts</h4>
+        <div class="row"><input id="rDepNew" type="text" placeholder="Nom du dépôt"><button class="btn pri" style="flex:0" onclick="addDepot()">Ajouter</button></div>
+        <div id="rDeps" class="list small" style="margin-top:8px"></div>
+      </div>
+      <div style="min-width:280px">
+        <h4 style="margin:6px 0">👤 Opérateurs</h4>
+        <div class="row"><input id="rOpNew" type="text" placeholder="Prénom"><input id="rOpCode" type="text" inputmode="numeric" maxlength="6" value="1234" style="max-width:90px"><button class="btn pri" style="flex:0" onclick="addOp()">Ajouter</button></div>
+        <div id="rOps" class="list small" style="margin-top:8px"></div>
+      </div>
+    </div>
+    <p class="small muted">Un dépôt ou opérateur désactivé n'apparaît plus sur les téléphones, mais reste dans l'historique des comptages. Code opérateur : 4 à 6 chiffres (1234 par défaut).</p>
   </div>
 
   <!-- Marques & logos -->
@@ -420,20 +445,49 @@ async function initSaisie(){
   $('sInv').innerHTML = data.map(i=>`<option value="${i.id}">${esc(i.nom)}</option>`).join('');
   const st = LS.get('setup',{});
   if(st.inv && data.some(i=>i.id==st.inv)) $('sInv').value=st.inv;
-  $('sWho').value = st.who||''; $('sZone').value = st.zone||'';
-  $('zonesList').innerHTML = (LS.get('zones',[])).map(z=>`<option value="${esc(z)}">`).join('');
-  if(st.inv && st.who && st.zone && data.some(i=>i.id==st.inv) && st.active){ startCount(true); }
-  else { show('setup'); hide('counting'); }
+  await loadRefs();
+  fillRefSelects(st);
+  show('setup'); hide('counting');
+  if(st.inv && st.who && st.zone && data.some(i=>i.id==st.inv) && st.active && REF.ops.some(o=>o.nom===st.who&&o.actif)){ startCount(true); }
   netState(); flushQueue();
 }
 function changeSetup(){ stopScan(); const st=LS.get('setup',{}); st.active=false; LS.set('setup',st); hide('counting'); show('setup'); }
+/* ---- dépôts & opérateurs ---- */
+let REF = LS.get('refs',{deps:[],ops:[]});
+async function loadRefs(){
+  try{
+    const [d,o]=await Promise.all([
+      sb.from('depots').select('*').order('nom'),
+      sb.from('operateurs').select('*').order('nom')
+    ]);
+    if(d.error||o.error) throw (d.error||o.error);
+    REF={deps:d.data,ops:o.data}; LS.set('refs',REF);
+  }catch(e){ /* hors-ligne : on garde le cache */ }
+}
+function fillRefSelects(st={}){
+  const deps=REF.deps.filter(d=>d.actif), ops=REF.ops.filter(o=>o.actif);
+  $('sWho').innerHTML='<option value="">— Choisir —</option>'+ops.map(o=>`<option ${o.nom===st.who?'selected':''}>${esc(o.nom)}</option>`).join('');
+  $('sZone').innerHTML='<option value="">— Choisir —</option>'+deps.map(d=>`<option ${d.nom===st.zone?'selected':''}>${esc(d.nom)}</option>`).join('');
+  $('sRefHelp').classList.toggle('hidden',!!(deps.length&&ops.length));
+}
+$('sPin').addEventListener('keydown',e=>{if(e.key==='Enter')startCount()});
+function switchDepot(z){
+  if(!z) return; S.zone=z; const st=LS.get('setup',{}); st.zone=z; LS.set('setup',st);
+  toast('Dépôt : '+z,'ok'); if(S.cur) renderDup(S.cur);
+}
 async function startCount(silent){
-  const inv=+$('sInv').value, who=$('sWho').value.trim(), zone=$('sZone').value.trim();
-  if(!who||!zone) return toast('Indiquez votre prénom et la zone','bad');
+  const inv=+$('sInv').value, who=$('sWho').value, zone=$('sZone').value;
+  if(!who||!zone) return toast('Choisissez l\'opérateur et le dépôt','bad');
+  const st0=LS.get('setup',{});
+  if(silent!==true || st0.who!==who){
+    const op=REF.ops.find(o=>o.nom===who);
+    if(!op || $('sPin').value!==String(op.code)){ $('sPin').value=''; return toast('Code opérateur incorrect','bad'); }
+  }
+  $('sPin').value='';
   LS.set('setup',{inv,who,zone,active:true});
-  const zs=LS.get('zones',[]); if(!zs.includes(zone)){zs.unshift(zone);LS.set('zones',zs.slice(0,20));}
   S.inv=inv; S.who=who; S.zone=zone;
-  $('cInv').textContent=$('sInv').selectedOptions[0].text; $('cWho').textContent='👤 '+who; $('cZone').textContent='📍 '+zone;
+  $('cInv').textContent=$('sInv').selectedOptions[0].text; $('cWho').textContent='👤 '+who;
+  $('cZone').innerHTML=REF.deps.filter(d=>d.actif||d.nom===zone).map(d=>`<option ${d.nom===zone?'selected':''}>${esc(d.nom)}</option>`).join('');
   hide('setup'); show('counting');
   loadLogos();
   await loadArts(); await loadMine(); subscribeArts();
@@ -922,6 +976,45 @@ async function doImport(){
     toast(`${rows.length} articles importés`,'ok'); hide('importBox'); initBureau(inv.id);
   }catch(e){ toast('Erreur : '+e.message,'bad'); }
   $('iGo').disabled=false; $('iGo').textContent="Importer et créer l'inventaire";
+}
+
+/* ---- dépôts & opérateurs (bureau) ---- */
+async function showRefs(){
+  show('refBox'); await loadRefs();
+  $('rDeps').innerHTML = REF.deps.length ? REF.deps.map(d=>`<div class="it">
+      <div class="t"><div><b style="${d.actif?'':'text-decoration:line-through;opacity:.6'}">${esc(d.nom)}</b></div></div>
+      <button class="btn sm" onclick="renRef('depots',${d.id},this.dataset.n)" data-n="${esc(d.nom)}">Renommer</button>
+      <button class="btn sm ${d.actif?'red':''}" onclick="togRef('depots',${d.id},${!d.actif})">${d.actif?'Désactiver':'Réactiver'}</button></div>`).join('') : '<div class="muted">Aucun dépôt</div>';
+  $('rOps').innerHTML = REF.ops.length ? REF.ops.map(o=>`<div class="it">
+      <div class="t"><div><b style="${o.actif?'':'text-decoration:line-through;opacity:.6'}">${esc(o.nom)}</b> <span class="muted">code ${esc(o.code)}</span></div></div>
+      <button class="btn sm" onclick="renRef('operateurs',${o.id},this.dataset.n)" data-n="${esc(o.nom)}">Renommer</button>
+      <button class="btn sm" onclick="codeOp(${o.id})">Code</button>
+      <button class="btn sm ${o.actif?'red':''}" onclick="togRef('operateurs',${o.id},${!o.actif})">${o.actif?'Désactiver':'Réactiver'}</button></div>`).join('') : '<div class="muted">Aucun opérateur — ajoutez au moins une personne.</div>';
+}
+async function refErr(error){ toast(/duplicate|unique/i.test(error.message)?'Ce nom existe déjà':/check/i.test(error.message)?'Le code doit faire 4 à 6 chiffres':error.message,'bad'); }
+async function addDepot(){
+  const nom=$('rDepNew').value.trim(); if(!nom) return;
+  const {error}=await sb.from('depots').insert({nom}); if(error) return refErr(error);
+  $('rDepNew').value=''; showRefs();
+}
+async function addOp(){
+  const nom=$('rOpNew').value.trim(), code=$('rOpCode').value.trim()||'1234'; if(!nom) return;
+  const {error}=await sb.from('operateurs').insert({nom,code}); if(error) return refErr(error);
+  $('rOpNew').value=''; $('rOpCode').value='1234'; showRefs();
+}
+async function renRef(table,id,old){
+  const nom=prompt('Nouveau nom :',old); if(!nom||nom.trim()===old) return;
+  const {error}=await sb.from(table).update({nom:nom.trim()}).eq('id',id); if(error) return refErr(error);
+  showRefs();
+}
+async function codeOp(id){
+  const code=prompt('Nouveau code (4 à 6 chiffres) :','1234'); if(!code) return;
+  const {error}=await sb.from('operateurs').update({code:code.trim()}).eq('id',id); if(error) return refErr(error);
+  showRefs();
+}
+async function togRef(table,id,actif){
+  const {error}=await sb.from(table).update({actif}).eq('id',id); if(error) return refErr(error);
+  showRefs();
 }
 
 /* ---- marques (bureau) ---- */
