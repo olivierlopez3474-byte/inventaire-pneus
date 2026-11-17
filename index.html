@@ -275,6 +275,7 @@ tr.trhors td{background:#fff0e3}
     <div id="reader"></div>
     <button id="btnScan" class="btn dark scanbtn" onclick="toggleScan()">📷 Scanner un code-barres</button>
     <div class="small muted" style="margin-top:6px;text-align:center">Image floue ? Reculez à 20–30 cm, ou touchez l'image pour forcer la lecture.</div>
+    <button class="btn pri scanbtn" style="margin-top:10px;font-size:17px;padding:14px" onclick="voiceSearch()">🎤 Pneu inaccessible ? Dites ce que vous lisez</button>
 
     <div class="card" style="margin-top:12px">
       <div class="row">
@@ -557,7 +558,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v18.11 00:20';
+const APP_V='v18.11 00:35';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -779,7 +780,7 @@ async function startCount(silent){
 let cntSub;
 async function loadAllCounts(){
   try{
-    S.allC = await fetchAll('comptages','id,ean,qte,zone,rack,compteur,recomptage,created_at',q=>q.eq('inventaire_id',S.inv));
+    S.allC = await fetchAll('comptages','id,ean,qte,zone,rack,compteur,recomptage,source,created_at',q=>q.eq('inventaire_id',S.inv));
     LS.set('cpt_'+S.inv,S.allC);
   }catch(e){ S.allC = LS.get('cpt_'+S.inv,[]); }
   if(cntSub) sb.removeChannel(cntSub);
@@ -941,7 +942,7 @@ function renderRecList(){
   $('recList').innerHTML = todo.length ? todo.map(x=>{
     const head = x.t ? 'Dans l\'ordre du 1er comptage (plus ancien en haut)' : 'Jamais comptés (stock attendu)';
     const hd = head!==lastHead ? `<div class="small" style="margin:8px 0 2px;font-weight:800;color:${x.t?'#7a5b00':'#7b3fe4'}">${esc(head)}</div>` : ''; lastHead=head;
-    return hd+`<div class="it ${x.t?'':'notcounted'}" onclick="openArt('${esc(x.a.ean)}')"><span class="brandsm">${brandHtml(brandOf(x.a))}</span>
+    return hd+`<div class="it ${x.t?'':'notcounted'}" onclick="openArtManual('${esc(x.a.ean)}')"><span class="brandsm">${brandHtml(brandOf(x.a))}</span>
       <div class="t"><div><b>${esc(x.a.designation)}</b></div><div class="muted">${x.t?'<b>'+hms(x.t)+'</b> · ':''}${esc(x.depot?lieu(x.depot,x.rack):'emplacement inconnu')}${fmtDim(x.a.dimension)?' · <b>'+esc(fmtDim(x.a.dimension))+'</b>':''}${x.a.reference?' · Réf. '+esc(x.a.reference):''}</div></div>
       <span class="pill ${x.t?'warn':'test'}">${x.t?'à recompter':'non compté'}</span></div>`; }).join('')
     : `<div class="muted" style="padding:8px 0">Tout est recompté 👍 (${done})</div>`;
@@ -967,7 +968,7 @@ function renderMine(){
      const hf=(S.byEan.get(c.ean)||{}).hors_feuille;
      return `<div class="it ${hf?'horsrow':''}">
      <div class="q">${fmt(c.qte)}</div>
-     <div class="t"><div>${esc(artLabel(c.ean))}${hf?' <span class="pill horsp">📦 hors feuille</span>':''}</div><div class="muted"><b>${hms(c.created_at)}</b> · ${esc(c.compteur||'?')} · ${esc(lieu(c.zone,c.rack))}${c._p?' · <span class="neg">en attente</span>':''}</div></div>
+     <div class="t"><div>${esc(artLabel(c.ean))}${hf?' <span class="pill horsp">📦 hors feuille</span>':''}</div><div class="muted"><b>${hms(c.created_at)}</b>${c.source==='manuel'?' ✋':''} · ${esc(c.compteur||'?')} · ${esc(lieu(c.zone,c.rack))}${c._p?' · <span class="neg">en attente</span>':''}</div></div>
      ${c._p||!mineOk?'':`<button class="btn sm" onclick="editCount(${c.id})" title="Corriger la quantité">✏️</button><button class="btn sm red" onclick="delCount(${c.id})" title="Supprimer">✕</button>`}</div>`; }).join('')
      + (all.length>shown.length?`<button class="btn sm" style="width:100%;margin-top:8px" onclick="MINE_LIMIT+=100;renderMine()">Afficher plus (${all.length-shown.length} restantes)</button>`:'')
      : '<div class="muted">Aucune saisie pour l\'instant.</div>';
@@ -1007,11 +1008,25 @@ function matchArt(a,q){
   const words=norm(q).split(/[\s,;]+/).filter(Boolean);
   return words.length>0 && words.every(w=>{ const ws=squash(w); return H.t.includes(w) || (ws && (H.s.includes(ws)||H.s2.includes(ws.replace(/zr/g,'r')))); });
 }
+function voiceSearch(){
+  stopScan(); $('q').value=''; $('res').innerHTML='';
+  $('q').scrollIntoView({behavior:'smooth',block:'center'});
+  const mic=$('q').parentNode.querySelector('.mic');
+  if(mic) mic.click(); else { $('q').focus(); toast('Utilisez le micro du clavier pour dicter','ok'); }
+}
+function countedQty(ean){ return S.allC.concat(Q.filter(c=>c.inventaire_id===S.inv)).filter(c=>c.ean===ean&&!c.recomptage).reduce((s,c)=>s+Number(c.qte),0); }
+function countedAny(ean){ return S.allC.some(c=>c.ean===ean&&!c.recomptage) || Q.some(c=>c.inventaire_id===S.inv&&c.ean===ean&&!c.recomptage); }
 function searchArt(){
   const q=$('q').value; const box=$('res');
   if(q.trim().length<2){box.innerHTML='';return;}
-  const all=S.arts.filter(a=>matchArt(a,q)), r=all.slice(0,50);
-  box.innerHTML = (all.length>r.length?`<div class="muted small" style="padding:4px 0">${all.length} résultats — affinez la recherche</div>`:'') + (r.length? r.map(a=>`<div class="it" onclick="openArt('${esc(a.ean)}')"><span class="brandsm">${brandHtml(brandOf(a))}</span><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${[fmtDim(a.dimension)?'<b>'+esc(fmtDim(a.dimension))+'</b>':'', a.reference?'Réf. '+esc(a.reference):'', esc(a.ean)].filter(Boolean).join(' · ')}</div></div>${$('recMode').checked?'':`<span class="pill">stock ${fmt(a.qte_theorique)}</span>`}</div>`).join('') : '<div class="muted" style="padding:8px 0">Aucun résultat</div>');
+  // dimension dictée/tapée (ex. 225/65R17, 225 65 17) : les articles de cette dimension exacte d'abord
+  const dm=q.replace(/\s+/g,' ').match(/(\d{3})\s*[\/ ]?\s*(\d{2})\s*z?r?\s*(\d{2})/i), dim=dm?dm[1]+dm[2]+dm[3]:'';
+  const all=S.arts.filter(a=>matchArt(a,q)).sort((a,b)=>
+    ((dim&&String(b.dimension)===dim)-(dim&&String(a.dimension)===dim)) ||
+    (countedAny(a.ean)-countedAny(b.ean)) ||
+    String(a.designation).localeCompare(String(b.designation),'fr'));
+  const r=all.slice(0,50);
+  box.innerHTML = (all.length>r.length?`<div class="muted small" style="padding:4px 0">${all.length} résultats — affinez la recherche</div>`:'') + (r.length? r.map(a=>`<div class="it" onclick="openArtManual('${esc(a.ean)}')"><span class="brandsm">${brandHtml(brandOf(a))}</span><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${[fmtDim(a.dimension)?'<b>'+esc(fmtDim(a.dimension))+'</b>':'', a.reference?'Réf. '+esc(a.reference):'', esc(a.ean)].filter(Boolean).join(' · ')}</div></div>${$('recMode').checked?'':(countedAny(a.ean)?`<span class="pill ok">compté ${fmt(countedQty(a.ean))}</span>`:`<span class="pill">à compter</span>`)}</div>`).join('') : '<div class="muted" style="padding:8px 0">Aucun résultat</div>');
 }
 
 /* scan : moteur ZXing-C++ (WebAssembly) via l'API BarcodeDetector — bien plus fiable que l'ancien moteur sur les EAN */
@@ -1240,7 +1255,9 @@ function renderTest(){
       ${canCreate?`<button class="btn sm ${t.form?'':'pri'}" style="margin-top:8px" onclick="testCreateForm(${i})">${t.form?'Annuler':'➕ Créer l\'article dans un inventaire'}</button>`:''}
       ${form}</div>`; }).join('') : '<div class="muted small">Scannez n\'importe quel code-barres (boîte de gâteaux, livre…) : le texte lu s\'affichera ici.</div>';
 }
+let SRC='scan';
 function onScan(txt){
+  SRC='scan';
   const now=Date.now(); const k=keyEan(txt);
   if(k===S.lastCode && now-S.lastT<1500){ S.lastT=now; return; } // toujours dans le champ : on ignore
   S.lastCode=k; S.lastT=now;
@@ -1268,6 +1285,7 @@ let CATHIT=null; // article trouvé dans la base articles (pas encore dans la fe
 async function catLookup(ean){
   try{ const {data}=await sb.from('catalogue').select('*').eq('ean',ean).limit(1); return (data&&data[0])||null; }catch(e){ return null; }
 }
+function openArtManual(ean){ SRC='manuel'; openArt(ean); }
 function openArt(ean){
   const a=S.byEan.get(ean); S.cur=ean; CATHIT=null;
   if(!a){ // hors feuille : on cherche dans la base articles
@@ -1282,6 +1300,7 @@ function openArt(ean){
   $('btnEditArt').classList.toggle('hidden',!a || !isAdmin()); if(!a){$('naDes').value='';$('naStock').value=0;$('naPrix').value='';}
   $('aInfo').innerHTML = (a&&a.hors_feuille?'<span class="pill horsp">📦 Hors feuille — à régulariser</span> ':'');
   const dd=renderDup(ean);
+  if(SRC==='manuel') $('aInfo').innerHTML += '<span class="pill" style="background:#e3ebfb;color:#2b5fd9">✋ Saisie sans scan — vérifiez bien la dimension et le modèle</span>';
   if(dd.prev.length){ beep('warn'); }
   $('aQty').value=1; updateSaveLabels(); show('artCard'); $('res').innerHTML=''; $('q').value='';
   $('artCard').scrollIntoView({behavior:'smooth',block:'center'});
@@ -1342,7 +1361,7 @@ async function showExpected(){
   const rk=a=>(known(a.ean,S.inv).find(m=>m.depot===z)||{}).racks||'~';
   const todo=exp.filter(a=>!counted.has(a.ean)).sort((x,y)=>rk(x).localeCompare(rk(y),'fr',{numeric:true})||String(x.designation).localeCompare(y.designation));
   $('expHead').innerHTML = exp.length ? `${fmt(exp.length)} article(s) vus dans <b>${esc(z)}</b> au dernier inventaire — <b>${fmt(todo.length)} pas encore comptés ici</b>` : `Aucun article n'a encore été compté dans <b>${esc(z)}</b> lors d'un inventaire précédent. La liste se remplira au fil des inventaires.`;
-  $('expList').innerHTML = todo.map(a=>{ const m=known(a.ean,S.inv).find(m=>m.depot===z); return `<div class="it" onclick="openArt('${esc(a.ean)}')"><span class="brandsm">${brandHtml(brandOf(a))}</span><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${esc(a.ean)} · ${m.racks?'<b>rack '+esc(m.racks)+'</b> · ':''}dernière fois ${fmt(m.qte)} le ${dshort(m.vu)}</div></div></div>`; }).join('');
+  $('expList').innerHTML = todo.map(a=>{ const m=known(a.ean,S.inv).find(m=>m.depot===z); return `<div class="it" onclick="openArtManual('${esc(a.ean)}')"><span class="brandsm">${brandHtml(brandOf(a))}</span><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${esc(a.ean)} · ${m.racks?'<b>rack '+esc(m.racks)+'</b> · ':''}dernière fois ${fmt(m.qte)} le ${dshort(m.vu)}</div></div></div>`; }).join('');
   show('expBox');
 }
 function modeBadges(){ $('cFast').classList.toggle('hidden',!$('fast').checked); $('cRec').classList.toggle('hidden',!$('recMode').checked); }
@@ -1380,7 +1399,7 @@ async function saveCount(mode='add'){
 }
 function addCount(ean,qte){
   const rec = isRec(ean);
-  Q.push({inventaire_id:S.inv,ean,qte,zone:S.zone,rack:S.rack||null,compteur:S.who,recomptage:rec,created_at:new Date().toISOString()});
+  Q.push({inventaire_id:S.inv,ean,qte,zone:S.zone,rack:S.rack||null,compteur:S.who,recomptage:rec,source:SRC==='manuel'?'manuel':'scan',created_at:new Date().toISOString()});
   LS.set('queue',Q); renderMine(); netState(); flushQueue();
 }
 let flushing=false;
@@ -1547,7 +1566,7 @@ function cols(){
     case 'anomalies': return [...base,n('theo','Stock'),{k:'pb',l:'Problème',f:r=>[r.negTheo?'<span class="pill bad">stock négatif</span>':'',(!r.art||!r.art.ean||r.ean.startsWith('LIGNE'))?'<span class="pill warn">sans EAN</span>':''].join(' ')},n('compte','Compté')];
     case 'tout': return [sel,...base,n('theo','Stock'),n('compte1','Compté'),n('recompte','Recompté'),ec,n('prix','Prix HT',r=>eur(r.prix)),n('valEcart','Écart €',r=>eur(r.valEcart)),{k:'zones',l:'Compté dans',f:r=>esc(r.lieux.join(', '))},{k:'lastDep',l:'Dernier dépôt connu',f:r=>esc(r.knownTxt)||'<span class="muted">—</span>'}];
     case 'horsf': return [...base,{k:'marque',l:'Marque',f:r=>esc(r.art?.marque||'')},n('compte','Compté'),{k:'zones',l:'Compté dans',f:r=>esc(r.lieux.join(', '))},{k:'compteurs',l:'Par',f:r=>esc(r.compteurs.join(', '))},{k:'h',l:'Heure',f:r=>r.c.length?new Date(r.c.map(c=>c.created_at).sort().pop()).toLocaleString('fr-FR'):''}];
-    case 'saisies': return [{k:'created_at',l:'Date',f:c=>new Date(c.created_at).toLocaleString('fr-FR')},{k:'compteur',l:'Par'},{k:'zone',l:'Dépôt'},{k:'rack',l:'Rack'},{k:'ean',l:'EAN'},{k:'_des',l:'Désignation',f:c=>{const a=B.rows.find(r=>r.ean===c.ean);return esc(a?a.des:'')}},n('qte','Qté'),{k:'recomptage',l:'Type',f:c=>c.recomptage?'<span class="pill warn">recomptage</span>':'comptage'},{k:'_x',l:'',f:c=>`<button class="btn sm" onclick="bEdit(${c.id})">✏️ Corriger</button> <button class="btn sm red" onclick="bDel(${c.id})">Supprimer</button>`}];
+    case 'saisies': return [{k:'created_at',l:'Date',f:c=>new Date(c.created_at).toLocaleString('fr-FR')},{k:'compteur',l:'Par'},{k:'zone',l:'Dépôt'},{k:'rack',l:'Rack'},{k:'ean',l:'EAN'},{k:'_des',l:'Désignation',f:c=>{const a=B.rows.find(r=>r.ean===c.ean);return esc(a?a.des:'')}},n('qte','Qté'),{k:'recomptage',l:'Type',f:c=>(c.recomptage?'<span class="pill warn">recomptage</span>':'comptage')+(c.source==='manuel'?' <span class="pill">✋ manuel</span>':' 📷')},{k:'_x',l:'',f:c=>`<button class="btn sm" onclick="bEdit(${c.id})">✏️ Corriger</button> <button class="btn sm red" onclick="bDel(${c.id})">Supprimer</button>`}];
   }
 }
 function tSel(e,on){ on?B.sel.add(e):B.sel.delete(e); renderActions(); }
@@ -1642,7 +1661,7 @@ function exportXlsx(){
   add('Non référencés',sets.nonref().map(line));
   add('Hors feuille (régul)',sets.horsf().map(line));
   add('Doublons',sets.doublons().map(r=>({...line(r),'Motif':[r.dupFile?'EAN double fichier':'',r.zones.length>1?'plusieurs zones':'',r.compteurs.length>1?'plusieurs compteurs':'',r.rapides?'saisies répétées <20s':''].filter(Boolean).join(', ')})));
-  add('Journal saisies',B.cpt.map(c=>({'Date':new Date(c.created_at).toLocaleString('fr-FR'),'Compteur':c.compteur,'Dépôt':c.zone,'Rack':c.rack||'','EAN':c.ean,'Désignation':(B.rows.find(r=>r.ean===c.ean)||{}).des,'Quantité':Number(c.qte),'Type':c.recomptage?'Recomptage':'Comptage'})));
+  add('Journal saisies',B.cpt.map(c=>({'Date':new Date(c.created_at).toLocaleString('fr-FR'),'Compteur':c.compteur,'Dépôt':c.zone,'Rack':c.rack||'','EAN':c.ean,'Désignation':(B.rows.find(r=>r.ean===c.ean)||{}).des,'Quantité':Number(c.qte),'Type':c.recomptage?'Recomptage':'Comptage','Saisie':c.source==='manuel'?'Manuelle (sans scan)':'Scan'})));
   XLSX.writeFile(wb,`Inventaire_${B.inv.nom.replace(/[^\w\-]+/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
