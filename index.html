@@ -328,7 +328,7 @@ body.noadmin #toast{bottom:24px!important}
       <div class="row"><b id="listTitle">Articles comptés</b><span class="muted small" style="text-align:right" id="myTotal"></span></div>
       <div id="mine" class="list small"></div>
       <div id="recBox" class="hidden">
-        <div class="small" style="margin:4px 0 8px;padding:8px 10px;background:#fff4cc;border-radius:8px">🔁 <b>Recomptage lancé par l'admin</b> — articles à recompter, classés par rack puis par libellé. Comptez ce que vous voyez : la quantité attendue n'est volontairement pas affichée. <span id="recN"></span></div>
+        <div class="small" style="margin:4px 0 8px;padding:8px 10px;background:#fff4cc;border-radius:8px">🔁 <b>Recomptage lancé par l'admin</b> — articles à recompter, dans le même ordre que le 1er comptage (plus récent en haut). Comptez ce que vous voyez : la quantité attendue n'est volontairement pas affichée. <span id="recN"></span></div>
         <div class="list small" id="recList"></div>
       </div>
     </div>
@@ -538,7 +538,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 23:40';
+const APP_V='v17.11 23:50';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -873,10 +873,11 @@ function subscribeInv(){
 }
 // Liste des écarts : compté (1er comptage) ≠ stock, y compris jamais compté avec du stock
 function recItems(){
-  const first={}, rec={}, loc={};
+  const first={}, rec={}, loc={}, last={};
   S.allC.concat(Q.filter(c=>c.inventaire_id===S.inv)).forEach(c=>{
     const q=Number(c.qte);
-    if(c.recomptage) rec[c.ean]=(rec[c.ean]||0)+q; else first[c.ean]=(first[c.ean]||0)+q;
+    if(c.recomptage) rec[c.ean]=(rec[c.ean]||0)+q;
+    else { first[c.ean]=(first[c.ean]||0)+q; if(!last[c.ean]||c.created_at>last[c.ean].created_at) last[c.ean]=c; }
     (loc[c.ean]=loc[c.ean]||new Set()).add(JSON.stringify([c.zone||'',c.rack||'']));
   });
   return S.arts.map(a=>{
@@ -885,14 +886,14 @@ function recItems(){
     if(!counted && theo<=0) return null;      // rien en stock, jamais compté : pas d'écart
     let places=[...(loc[a.ean]||[])].map(s=>JSON.parse(s));
     if(!places.length){ const k=known(a.ean,S.inv)[0]; if(k) places=[[k.depot,(k.racks||'').split(',')[0].trim()]]; }
-    places.sort((x,y)=>(x[0]===S.zone?-1:0)-(y[0]===S.zone?-1:0));
-    const p=places[0]||['',''];
-    return {a, theo, c1, counted, done: a.ean in rec, rc: rec[a.ean], depot:p[0], rack:p[1]};
+    const lc=last[a.ean];
+    const p=lc?[lc.zone||'',lc.rack||'']:(places[0]||['','']);
+    return {a, theo, c1, counted, done: a.ean in rec, rc: rec[a.ean], depot:p[0], rack:p[1], t: lc?lc.created_at:''};
   }).filter(Boolean).sort((x,y)=>
+    // même ordre que le 1er comptage : du plus récent au plus ancien ; jamais comptés ensuite (par libellé) ; recomptés en fin
     (x.done-y.done) ||
-    ((x.depot===S.zone?0:x.depot?1:2)-(y.depot===S.zone?0:y.depot?1:2)) ||
-    String(x.depot).localeCompare(String(y.depot),'fr') ||
-    ((x.rack?0:1)-(y.rack?0:1)) || String(x.rack).localeCompare(String(y.rack),'fr',{numeric:true}) ||
+    ((x.t?0:1)-(y.t?0:1)) ||
+    (x.t&&y.t ? new Date(y.t)-new Date(x.t) : 0) ||
     String(x.a.designation).localeCompare(String(y.a.designation),'fr'));
 }
 function renderRecList(){
@@ -903,11 +904,11 @@ function renderRecList(){
   $('recN').innerHTML = ''; $('myTotal').innerHTML = `<b>${left}</b> à recompter · ${it.length-left} fait(s)`;
   let lastHead='';
   $('recList').innerHTML = it.length ? it.map(x=>{
-    const head = x.done ? '✓ Déjà recomptés' : x.depot ? lieu(x.depot,x.rack) : 'Emplacement inconnu';
+    const head = x.done ? '✓ Déjà recomptés' : x.t ? 'Dans l\'ordre du 1er comptage (plus récent en haut)' : 'Jamais comptés';
     const h = head!==lastHead ? `<div class="small" style="margin:8px 0 2px;font-weight:800;color:#7a5b00">${esc(head)}</div>` : ''; lastHead=head;
     const ec = x.c1-x.theo;
     return h+`<div class="it" style="${x.done?'opacity:.55':''}" onclick="openArt('${esc(x.a.ean)}')"><span class="brandsm">${brandHtml(brandOf(x.a))}</span>
-      <div class="t"><div><b>${esc(x.a.designation)}</b></div><div class="muted">${x.a.reference?'Réf. '+esc(x.a.reference)+' · ':''}${esc(x.depot?lieu(x.depot,x.rack):'emplacement inconnu')}</div></div>
+      <div class="t"><div><b>${esc(x.a.designation)}</b></div><div class="muted">${x.t?'<b>'+hms(x.t)+'</b> · ':''}${esc(x.depot?lieu(x.depot,x.rack):'emplacement inconnu')}${x.a.reference?' · Réf. '+esc(x.a.reference):''}</div></div>
       <span class="pill ${x.done?'ok':'warn'}">${x.done?'✓ fait':'à recompter'}</span></div>`; }).join('')
     : '<div class="muted" style="padding:8px 0">Aucun écart 👍</div>';
 }
