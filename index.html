@@ -332,9 +332,6 @@ tr.trhors td{background:#fff0e3}
       <div id="editArt" class="hidden" style="margin-top:10px;padding:10px;background:#eef3fd;border-radius:10px">
         <div class="small"><b>✏️ Modifier l'article</b> (dans l'inventaire en cours)</div>
         <label class="f">Désignation</label><input id="eaDes" type="text">
-        <div class="row">
-          <div><label class="f">Prix HT</label><input id="eaPrix" type="number" inputmode="decimal" step="0.01"></div>
-        </div>
         <div class="row" style="margin-top:10px">
           <button class="btn" onclick="toggleEditArt()">Annuler</button>
           <button class="btn dark" onclick="saveEditArt()">💾 Enregistrer</button>
@@ -587,7 +584,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v18.11 01:40';
+const APP_V='v18.11 01:45';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -1385,12 +1382,12 @@ function toggleEditArt(){
   const a=S.byEan.get(S.cur); if(!a) return;
   const box=$('editArt'); const open=box.classList.contains('hidden');
   box.classList.toggle('hidden',!open);
-  if(open){ $('eaDes').value=a.designation||''; $('eaPrix').value=a.prix??''; }
+  if(open){ $('eaDes').value=a.designation||''; }
 }
 async function saveEditArt(){
   const a=S.byEan.get(S.cur); if(!a) return;
   const des=$('eaDes').value.trim(); if(!des) return toast('La désignation ne peut pas être vide','bad');
-  const upd={designation:des, prix:$('eaPrix').value===''?null:+$('eaPrix').value};
+  const upd={designation:des};
   const {error}=await sb.from('articles').update(upd).eq('id',a.id);
   if(error) return toast(error.message,'bad');
   Object.assign(a,upd); delete a._hay; LS.set('arts_'+S.inv,S.arts);
