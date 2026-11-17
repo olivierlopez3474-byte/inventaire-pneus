@@ -163,6 +163,10 @@ body.noadmin #toast{bottom:24px!important}
 #mdBody .list .it .btn{width:48px;height:48px;font-size:18px;padding:0}
 #mdBody .row .btn{padding:16px;font-size:18px}
 #mdBody .md-title{font-size:26px!important}
+.rackbig{flex:0 0 auto;min-width:74px;text-align:center;background:var(--acc);color:var(--ink);border-radius:10px;padding:6px 8px;font-weight:900;font-size:24px;line-height:1.05}
+.rackbig small{display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;opacity:.75;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rackbig.norack{background:#e9e6de;font-size:18px}
+.multi{margin-top:4px;font-size:14px;font-weight:700;color:#b14a00;background:#ffe8d6;border-radius:6px;padding:3px 8px;display:inline-block}
 .it.horsrow{background:#ffe8d6;border-radius:8px;padding-left:6px;padding-right:6px}
 .pill.horsp{background:#ffd3ad;color:#7a3b00}
 .art.horsf{border-left-color:#f0a76a}
@@ -584,7 +588,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v18.11 01:20';
+const APP_V='v18.11 01:30';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -933,26 +937,35 @@ function subscribeInv(){
   }).subscribe();
 }
 // Liste des écarts : compté (1er comptage) ≠ stock, y compris jamais compté avec du stock
+// Une ligne par EMPLACEMENT du 1er comptage (dépôt + rack), dans l'ordre du trajet
 function recItems(){
-  const first={}, rec={}, loc={}, last={};
-  S.allC.concat(Q.filter(c=>c.inventaire_id===S.inv)).forEach(c=>{
-    const q=Number(c.qte);
-    if(c.recomptage) rec[c.ean]=(rec[c.ean]||0)+q;
-    else { first[c.ean]=(first[c.ean]||0)+q; if(!last[c.ean]||c.created_at>last[c.ean].created_at) last[c.ean]=c; }
-    (loc[c.ean]=loc[c.ean]||new Set()).add(JSON.stringify([c.zone||'',c.rack||'']));
+  const all=S.allC.concat(Q.filter(c=>c.inventaire_id===S.inv));
+  const first={}, places={}, recs={};
+  all.forEach(c=>{
+    if(c.recomptage){ (recs[c.ean]=recs[c.ean]||[]).push(c); return; }
+    first[c.ean]=(first[c.ean]||0)+Number(c.qte);
+    const k=JSON.stringify([c.zone||'',c.rack||'']), P=(places[c.ean]=places[c.ean]||{});
+    if(!P[k]||c.created_at>P[k]) P[k]=c.created_at;   // heure du dernier passage à cet endroit
   });
-  return S.arts.map(a=>{
+  const out=[];
+  S.arts.forEach(a=>{
     const theo=Number(a.qte_theorique)||0, c1=first[a.ean]||0, counted=a.ean in first;
-    if(a.hors_feuille) return null;            // hors feuille : régularisation manuelle, pas de recomptage
-    if(c1===theo && counted) return null;      // pas d'écart
-    if(!counted && theo<=0) return null;      // rien en stock, jamais compté : pas d'écart
-    let places=[...(loc[a.ean]||[])].map(s=>JSON.parse(s));
-    if(!places.length){ const k=known(a.ean,S.inv)[0]; if(k) places=[[k.depot,(k.racks||'').split(',')[0].trim()]]; }
-    const lc=last[a.ean];
-    const p=lc?[lc.zone||'',lc.rack||'']:(places[0]||['','']);
-    return {a, theo, c1, counted, done: a.ean in rec, rc: rec[a.ean], depot:p[0], rack:p[1], t: lc?lc.created_at:''};
-  }).filter(Boolean).sort((x,y)=>
-    // même trajet que le 1er comptage : du plus ancien au plus récent ; jamais comptés ensuite (par libellé)
+    if(a.hors_feuille) return;                 // hors feuille : régularisation manuelle, pas de recomptage
+    if(c1===theo && counted) return;           // pas d'écart
+    if(!counted && theo<=0) return;            // rien en stock, jamais compté : pas d'écart
+    const rc=recs[a.ean]||[];
+    if(!counted){
+      const k=known(a.ean,S.inv)[0];
+      out.push({a, counted:false, done: rc.length>0, depot:k?k.depot:'', rack:k?(k.racks||'').split(',')[0].trim():'', t:'', n:1, idx:1, others:[]});
+      return;
+    }
+    const pl=Object.entries(places[a.ean]).map(([k,t])=>{const [z,r]=JSON.parse(k); return {z,r,t};}).sort((x,y)=>new Date(x.t)-new Date(y.t));
+    pl.forEach((p,i)=>{
+      const done = rc.some(c=>(c.zone||'')===p.z && (!p.r || (c.rack||'')===p.r)) || (pl.length===1 && rc.length>0);
+      out.push({a, counted:true, done, depot:p.z, rack:p.r, t:p.t, n:pl.length, idx:i+1, others:pl.filter(q=>q!==p).map(q=>lieu(q.z,q.r))});
+    });
+  });
+  return out.sort((x,y)=>
     (x.done-y.done) ||
     ((x.t?0:1)-(y.t?0:1)) ||
     (x.t&&y.t ? new Date(x.t)-new Date(y.t) : 0) ||
@@ -968,8 +981,11 @@ function renderRecList(){
   $('recList').innerHTML = todo.length ? todo.map(x=>{
     const head = x.t ? 'Dans l\'ordre du 1er comptage (plus ancien en haut)' : 'Jamais comptés (stock attendu)';
     const hd = head!==lastHead ? `<div class="small" style="margin:8px 0 2px;font-weight:800;color:${x.t?'#7a5b00':'#7b3fe4'}">${esc(head)}</div>` : ''; lastHead=head;
-    return hd+`<div class="it ${x.t?'':'notcounted'}" onclick="openArtManual('${esc(x.a.ean)}')"><span class="brandsm">${brandHtml(brandOf(x.a))}</span>
-      <div class="t"><div><b>${esc(x.a.designation)}</b></div><div class="muted">${x.t?'<b>'+hms(x.t)+'</b> · ':''}${esc(x.depot?lieu(x.depot,x.rack):'emplacement inconnu')}${fmtDim(x.a.dimension)?' · <b>'+esc(fmtDim(x.a.dimension))+'</b>':''}${x.a.reference?' · Réf. <b>'+esc(x.a.reference)+'</b>':''}</div></div>
+    return hd+`<div class="it ${x.t?'':'notcounted'}" onclick="openArtManual('${esc(x.a.ean)}')">
+      <div class="rackbig ${x.rack?'':'norack'}"><small>${esc(x.depot||'?')}</small>${esc(x.rack||'—')}</div>
+      <div class="t"><div>${esc(x.a.designation)}</div>
+        <div class="muted">${x.t?'<b>'+hms(x.t)+'</b> · ':''}${fmtDim(x.a.dimension)?'<b>'+esc(fmtDim(x.a.dimension))+'</b> · ':''}${x.a.reference?'Réf. <b>'+esc(x.a.reference)+'</b>':''}</div>
+        ${x.n>1?`<div class="multi">📍 Emplacement ${x.idx}/${x.n} — aussi : ${esc(x.others.join(', '))}</div>`:''}</div>
       <span class="pill ${x.t?'warn':'test'}">${x.t?'à recompter':'non compté'}</span></div>`; }).join('')
     : `<div class="muted" style="padding:8px 0">Tout est recompté 👍 (${done})</div>`;
 }
