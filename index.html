@@ -193,6 +193,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
       <select id="cRack" class="pill hidden" onchange="switchRack(this.value)"></select>
       <span class="pill hidden" id="cFast">⚡ rapide</span>
       <span class="pill warn hidden" id="cRec">🔁 recomptage</span>
+      <span class="pill bad hidden" id="cTest">🧪 test lecteur</span>
       <span class="pill bad hidden" id="cPend"></span>
       <span style="flex:1"></span>
       <button class="btn sm" id="btnOpt" onclick="toggleOpt()">⋯</button>
@@ -200,6 +201,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
     <div id="optBox" class="card hidden" style="padding:12px 14px">
       <div class="small muted">Inventaire : <b id="cInv"></b></div>
       <label class="switch" style="margin-top:10px"><input type="checkbox" id="fast" onchange="modeBadges()"> Mode rapide (1 scan = 1 pneu)</label>
+      <label class="switch" style="margin-top:8px"><input type="checkbox" id="testMode" onchange="modeBadges();renderTest()"> 🧪 Test du lecteur (affiche ce qui est lu, n'enregistre rien)</label>
       <label class="switch" style="margin-top:8px"><input type="checkbox" id="recMode" onchange="modeBadges();renderRecList();if(S.cur)renderDup(S.cur)"> Mode recomptage</label>
       <div class="row" style="margin-top:12px">
         <button class="btn sm" onclick="changeSetup()">Changer d'opérateur / inventaire</button>
@@ -219,6 +221,11 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 
     <div id="reader"></div>
     <button id="btnScan" class="btn dark scanbtn" onclick="toggleScan()">📷 Scanner un code-barres</button>
+
+    <div id="testBox" class="card hidden" style="margin-top:12px;border:2px dashed var(--bad)">
+      <div class="row"><b>🧪 Test du lecteur</b><span class="small muted" style="text-align:right">rien n'est enregistré</span></div>
+      <div id="testList" style="margin-top:8px"></div>
+    </div>
 
     <div class="card" style="margin-top:12px">
       <div class="row">
@@ -692,7 +699,35 @@ async function stopScan(){
   if(S.scanner && S.scanning){ try{ await S.scanner.stop(); }catch(e){} }
   S.scanning=false; if($('btnScan')) $('btnScan').textContent='📷 Scanner un code-barres';
 }
-function onScan(txt){
+let TESTS=[];
+function eanCheck(s){ // contrôle de la clé EAN-8 / UPC-A (12) / EAN-13 / 14
+  if(!/^\d+$/.test(s) || ![8,12,13,14].includes(s.length)) return null;
+  const d=s.split('').map(Number), c=d.pop();
+  const sum=d.reverse().reduce((t,v,i)=>t+v*(i%2===0?3:1),0);
+  return (10-sum%10)%10===c;
+}
+function renderTest(){
+  const on=$('testMode').checked; $('testBox').classList.toggle('hidden',!on);
+  if(!on) return;
+  $('testList').innerHTML = TESTS.length ? TESTS.map((t,i)=>{
+    const ck=eanCheck(t.raw), a=S.byEan.get(keyEan(t.raw));
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--line);${i?'opacity:.7':''}">
+      <div style="font:700 ${i?18:24}px ui-monospace,Menlo,Consolas,monospace;letter-spacing:1px;word-break:break-all">${esc(t.raw)}</div>
+      <div class="small" style="margin-top:4px">
+        <span class="pill blue">${esc(t.format||'saisie manuelle')}</span>
+        <span class="pill">${t.raw.length} caractère(s)</span>
+        ${ck===null?'':ck?'<span class="pill ok">clé de contrôle ✓</span>':'<span class="pill bad">clé de contrôle ✗</span>'}
+        ${a?`<span class="pill ok">trouvé : ${esc(a.designation)}</span>`:'<span class="pill warn">absent de l\'inventaire</span>'}
+        <span class="muted">${new Date(t.t).toLocaleTimeString('fr-FR')}</span>
+      </div></div>`; }).join('') : '<div class="muted small">Scannez n\'importe quel code-barres (boîte de gâteaux, livre…) : le texte lu s\'affichera ici.</div>';
+}
+function onScan(txt, result){
+  if($('testMode').checked){
+    const fmtName = result?.result?.format?.formatName || result?.format?.formatName || '';
+    if(TESTS[0] && TESTS[0].raw===txt && Date.now()-TESTS[0].t<1500) return;
+    TESTS.unshift({raw:String(txt),format:fmtName,t:Date.now()}); TESTS=TESTS.slice(0,10);
+    beep(true); renderTest(); return;
+  }
   const now=Date.now(); const k=keyEan(txt);
   if(k===S.lastCode && now-S.lastT<1800) return;
   S.lastCode=k; S.lastT=now;
@@ -755,7 +790,7 @@ async function showExpected(){
   show('expBox');
 }
 function toggleOpt(){ $('optBox').classList.toggle('hidden'); }
-function modeBadges(){ $('cFast').classList.toggle('hidden',!$('fast').checked); $('cRec').classList.toggle('hidden',!$('recMode').checked); }
+function modeBadges(){ $('cFast').classList.toggle('hidden',!$('fast').checked); $('cRec').classList.toggle('hidden',!$('recMode').checked); $('cTest').classList.toggle('hidden',!$('testMode').checked); }
 function simScan(){
   if(!S.arts.length) return toast('Aucun article dans cet inventaire','bad');
   const a=S.arts[Math.floor(Math.random()*S.arts.length)]; S.lastCode=''; onScan(a.ean);
