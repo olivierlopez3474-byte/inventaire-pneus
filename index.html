@@ -253,9 +253,8 @@ body.noadmin #toast{bottom:24px!important}
       </div>
       <span class="pill bad hidden" id="cPend"></span>
       <span style="flex:1"></span>
-      <button class="btn sm" onclick="toggleExpected()">📋 Attendus dans ce dépôt</button>
     </div>
-    <div id="expBox" class="card hidden" style="padding:12px 14px">
+    <div id="expBox" class="card hidden" style="display:none!important">
       <div class="small muted" id="expHead"></div>
       <div class="list small res" id="expList"></div>
     </div>
@@ -533,7 +532,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 23:00';
+const APP_V='v17.11 23:05';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -693,7 +692,6 @@ $('sPin').addEventListener('keydown',e=>{if(e.key==='Enter')startCount()});
 function switchDepot(z){
   if(!z) return; S.zone=z; S.rack=''; const st=LS.get('setup',{}); st.zone=z; st.rack=''; LS.set('setup',st);
   fillRacks(); toast('Dépôt : '+z,'ok'); if(S.cur) renderDup(S.cur); if($('recMode').checked) renderRecList();
-  if(!$('expBox').classList.contains('hidden')) showExpected();
 }
 // Racks du dépôt courant : liste facultative, masquée si le dépôt n'en a pas
 function fillRacks(){
