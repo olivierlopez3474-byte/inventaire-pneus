@@ -149,6 +149,13 @@ body.noadmin #toast{bottom:24px!important}
 #mine .it .q{font-size:22px}
 #mine .it, #recList .it, #res .it{padding:12px 0}
 @media (min-width:700px){ #mine .it .t > div:first-child, #recList .it .t > div:first-child, #res .it .t > div:first-child{font-size:19px} #mine .it .t .muted, #recList .it .t .muted, #res .it .t .muted{font-size:15px} }
+.modal{position:fixed;inset:0;z-index:60;background:rgba(10,12,16,.55);display:flex;align-items:flex-end;justify-content:center}
+.modalbox{position:relative;background:#fff;width:100%;max-width:620px;max-height:86vh;overflow:auto;border-radius:18px 18px 0 0;padding:18px 18px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -8px 30px rgba(0,0,0,.25)}
+@media (min-width:700px){.modal{align-items:center}.modalbox{border-radius:18px}}
+.modalx{position:absolute;top:12px;right:12px;width:44px;height:44px;border-radius:50%;padding:0;font-size:18px}
+.mdgrid{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:16px;margin:12px 0}
+.mdgrid span{color:var(--mute)}
+.mdgrid b{font-size:17px}
 .it.horsrow{background:#ffe8d6;border-radius:8px;padding-left:6px;padding-right:6px}
 .pill.horsp{background:#ffd3ad;color:#7a3b00}
 .art.horsf{border-left-color:#f0a76a}
@@ -172,6 +179,12 @@ tr.trhors td{background:#fff0e3}
 </head>
 <body>
 <div id="toast"></div>
+<div id="artModal" class="modal hidden" onclick="if(event.target===this)closeDetail()">
+  <div class="modalbox">
+    <button class="btn modalx" onclick="closeDetail()" title="Fermer">✕</button>
+    <div id="mdBody"></div>
+  </div>
+</div>
 <style>
 #labels{position:fixed;inset:0;background:#fff;z-index:50;overflow:auto;padding:20px}
 #labels .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:18px}
@@ -564,7 +577,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v18.11 00:55';
+const APP_V='v18.11 01:05';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -972,7 +985,7 @@ function renderMine(){
   $('mine').innerHTML = all.length ? shown.map(c=>{
      const mineOk = isAdmin() || c.compteur===S.who;
      const hf=(S.byEan.get(c.ean)||{}).hors_feuille;
-     return `<div class="it ${hf?'horsrow':''}">
+     return `<div class="it ${hf?'horsrow':''}" style="cursor:pointer" onclick="if(!event.target.closest('button'))artDetail('${esc(c.ean)}')">
      <div class="q">${fmt(c.qte)}</div>
      <div class="t"><div>${esc(artLabel(c.ean))}${hf?' <span class="pill horsp">📦 hors feuille</span>':''}</div><div class="muted">${(()=>{const ar=S.byEan.get(c.ean)||{}; return [ar.reference?'Réf. <b>'+esc(ar.reference)+'</b>':'', fmtDim(ar.dimension)?esc(fmtDim(ar.dimension)):''].filter(Boolean).join(' · ');})()}</div><div class="muted"><b>${hms(c.created_at)}</b>${c.source==='manuel'?' ✋':''} · ${esc(c.compteur||'?')} · ${esc(lieu(c.zone,c.rack))}${c._p?' · <span class="neg">en attente</span>':''}</div></div>
      ${c._p||!mineOk?'':`<button class="btn sm" onclick="editCount(${c.id})" title="Corriger la quantité">✏️</button><button class="btn sm red" onclick="delCount(${c.id})" title="Supprimer">✕</button>`}</div>`; }).join('')
@@ -1014,6 +1027,39 @@ function matchArt(a,q){
   const words=norm(q).split(/[\s,;]+/).filter(Boolean);
   return words.length>0 && words.every(w=>{ const ws=squash(w); return H.t.includes(w) || (ws && (H.s.includes(ws)||H.s2.includes(ws.replace(/zr/g,'r')))); });
 }
+// Fenêtre de détail d'un article (depuis la liste des comptés)
+function artDetail(ean){
+  const a=S.byEan.get(ean)||{ean,designation:'⚠ Code non référencé'}, rec=$('recMode').checked;
+  const cnt=S.allC.concat(Q.filter(c=>c.inventaire_id===S.inv).map(c=>({...c,_p:1}))).filter(c=>c.ean===ean).sort((x,y)=>new Date(y.created_at)-new Date(x.created_at));
+  const tot=cnt.filter(c=>!c.recomptage).reduce((s,c)=>s+Number(c.qte),0), totR=cnt.filter(c=>c.recomptage).reduce((s,c)=>s+Number(c.qte),0);
+  const kn=known(ean,S.inv);
+  const row=(l,v)=>v?`<span>${l}</span><b>${v}</b>`:'';
+  $('mdBody').innerHTML=`
+    <div class="brandbig">${brandHtml(brandOf(a))}</div>
+    <div style="font-size:22px;font-weight:800;line-height:1.25;padding-right:50px">${esc(a.designation)}</div>
+    ${a.hors_feuille?'<span class="pill horsp" style="margin-top:6px">📦 Hors feuille — à régulariser</span>':''}
+    <div class="mdgrid">
+      ${row('Réf. (code modèle)',esc(a.reference||''))}
+      ${row('Dimension',esc(fmtDim(a.dimension)))}
+      ${row('Marque',esc(a.marque||brandOf(a)||''))}
+      ${row('EAN',esc(ean))}
+      ${rec?'':row('Stock fichier',a.qte_theorique!=null?fmt(a.qte_theorique):'')}
+      ${row('Compté',fmt(tot)+(cnt.some(c=>!c.recomptage)?'':' (rien)'))}
+      ${totR||cnt.some(c=>c.recomptage)?row('Recompté',fmt(totR)):''}
+      ${kn.length?row('Habituellement',esc(knownTxt(kn.slice(0,2)))):''}
+    </div>
+    <div style="font-weight:800;margin:10px 0 4px">Saisies (${cnt.length})</div>
+    <div class="list">${cnt.map(c=>{ const ok=!c._p&&(isAdmin()||c.compteur===S.who); return `<div class="it">
+      <div class="q">${fmt(c.qte)}</div>
+      <div class="t"><div style="font-size:15px"><b>${hms(c.created_at)}</b>${c.source==='manuel'?' ✋':''} · ${esc(c.compteur||'?')}${c.recomptage?' · <span class="pill warn">recomptage</span>':''}${c._p?' · <span class="neg">en attente</span>':''}</div><div class="muted">${esc(lieu(c.zone,c.rack))}</div></div>
+      ${ok?`<button class="btn sm" onclick="editCount(${c.id}).then(()=>artDetail('${esc(ean)}'))">✏️</button><button class="btn sm red" onclick="delCount(${c.id}).then(()=>artDetail('${esc(ean)}'))">✕</button>`:''}</div>`; }).join('')||'<div class="muted">Aucune saisie</div>'}</div>
+    <div class="row" style="margin-top:14px;gap:8px">
+      <button class="btn" onclick="closeDetail()">Fermer</button>
+      <button class="btn pri" onclick="closeDetail();openArtManual('${esc(ean)}')">➕ Compter cet article</button>
+    </div>`;
+  show('artModal'); document.body.style.overflow='hidden';
+}
+function closeDetail(){ hide('artModal'); document.body.style.overflow=''; }
 function voiceSearch(){
   stopScan(); $('q').value=''; $('res').innerHTML='';
   $('q').scrollIntoView({behavior:'smooth',block:'center'});
