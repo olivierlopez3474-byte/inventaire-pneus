@@ -577,7 +577,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v18.11 01:05';
+const APP_V='v18.11 01:10';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -2059,6 +2059,8 @@ let deferredInstall;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstall=e;show('btnInstall')});
 async function installApp(){ if(!deferredInstall) return; deferredInstall.prompt(); await deferredInstall.userChoice; deferredInstall=null; hide('btnInstall'); }
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+// Portrait : verrouillage quand le système le permet (appli installée sur Android)
+try{ if(screen.orientation && screen.orientation.lock && (matchMedia('(display-mode: standalone)').matches||navigator.standalone)) screen.orientation.lock('portrait').catch(()=>{}); }catch(e){}
 
 // Pas de correction orthographique / majuscule automatique / suggestions dans les champs (codes, dimensions, références)
 function noAutoCorrect(root=document){
