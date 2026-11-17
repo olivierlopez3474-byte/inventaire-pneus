@@ -10,9 +10,9 @@
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-180.png">
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/barcode-detector@3.2.4/dist/iife/ponyfill.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
 :root{
   --bg:#f3f1ec; --card:#fff; --ink:#16181d; --mute:#6b6f78; --line:#e3e0d8;
@@ -60,6 +60,13 @@ label.f{display:block;font-size:12px;color:var(--mute);margin:10px 0 4px;text-tr
 .ctx .pill{font-size:13px;padding:4px 10px}
 #reader{width:100%;border-radius:var(--r);overflow:hidden;background:#000;min-height:0}
 #reader video{border-radius:var(--r)}
+.camwrap{position:relative;border-radius:var(--r);overflow:hidden;background:#000}
+.camwrap video{width:100%;display:block}
+.camguide{position:absolute;left:5%;right:5%;top:20%;bottom:20%;border:3px solid rgba(242,183,5,.95);border-radius:12px;box-shadow:0 0 0 999px rgba(0,0,0,.35);overflow:hidden}
+.camguide i{position:absolute;left:0;right:0;height:2px;background:#ff3b30;box-shadow:0 0 8px #ff3b30;animation:scanline 1.6s ease-in-out infinite alternate}
+@keyframes scanline{from{top:8%}to{top:92%}}
+.camtorch{position:absolute;top:10px;right:10px;width:46px;height:46px;border-radius:50%;border:0;background:rgba(0,0,0,.55);font-size:22px}
+.camtorch.on{background:var(--acc)}
 .scanbtn{width:100%;padding:18px;font-size:18px;border-radius:14px}
 .art{border-left:6px solid var(--acc)}
 .art.unk{border-left-color:var(--bad)}
@@ -423,7 +430,6 @@ body.noadmin #toast{bottom:24px!important}
   </div>
 </section>
 </main>
-<div id="fileReader" style="display:none"></div>
 <nav id="bnav">
   <button data-v="saisie" onclick="go('saisie')"><i>📷</i><span>Comptage</span></button>
   <button data-v="find" onclick="go('find')"><i>🔎</i><span>Où est ?</span></button>
@@ -494,7 +500,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 19:00';
+const APP_V='v17.11 19:10';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 function go(v,push=true){
@@ -508,6 +514,7 @@ function go(v,push=true){
   $('hdrMode').textContent=VIEWS[v][1]; $('appV').textContent=APP_V;
   if(push && (!history.state || history.state.v!==v || history.state.p)) history.pushState({v},'');
   window.scrollTo(0,0);
+  if(v==='saisie'||v==='test') getDetector().catch(()=>{});
   if(v==='saisie') initSaisie();
   else if(v==='bureau') initBureau();
   else if(v==='find') showFinder();
@@ -780,21 +787,70 @@ function searchArt(){
   box.innerHTML = r.length? r.map(a=>`<div class="it" onclick="openArt('${esc(a.ean)}')"><span class="brandsm">${brandHtml(brandOf(a))}</span><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${esc(a.ean)}${a.reference?' · '+esc(a.reference):''}</div></div><span class="pill">stock ${fmt(a.qte_theorique)}</span></div>`).join('') : '<div class="muted" style="padding:8px 0">Aucun résultat</div>';
 }
 
-/* scan */
+/* scan : moteur ZXing-C++ (WebAssembly) via l'API BarcodeDetector — bien plus fiable que l'ancien moteur sur les EAN */
+const BC_FORMATS=['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf','qr_code'];
+const FMT_LABEL={ean_13:'EAN-13',ean_8:'EAN-8',upc_a:'UPC-A',upc_e:'UPC-E',code_128:'Code 128',code_39:'Code 39',itf:'ITF',qr_code:'QR code'};
+let DETP=null;
+function getDetector(){
+  if(!DETP) DETP=(async()=>{
+    try{ if('BarcodeDetector' in window){ const sup=await window.BarcodeDetector.getSupportedFormats(); if(sup.includes('ean_13')) return new window.BarcodeDetector({formats:BC_FORMATS.filter(f=>sup.includes(f))}); } }catch(e){}
+    const API=window.BarcodeDetectionAPI; if(!API) throw new Error('module de lecture non chargé (réseau ?)');
+    const det=new API.BarcodeDetector({formats:BC_FORMATS});
+    // préchauffage : charge le moteur WebAssembly dès maintenant (1er scan instantané)
+    try{ const c=document.createElement('canvas'); c.width=c.height=8; await det.detect(c); }catch(e){}
+    return det;
+  })().catch(e=>{ DETP=null; throw e; });
+  return DETP;
+}
+class Cam{
+  constructor(boxId,onCode){ this.box=$(boxId); this.onCode=onCode; this.on=false; this.paused=false; }
+  async start(){
+    const det=await getDetector();
+    this.stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080},advanced:[{focusMode:'continuous'}]}});
+    this.box.innerHTML='<div class="camwrap"><video playsinline muted autoplay></video><div class="camguide"><i></i></div><button type="button" class="camtorch hidden">💡</button></div>';
+    this.video=this.box.querySelector('video'); this.video.srcObject=this.stream;
+    try{ await this.video.play(); }catch(e){}
+    this.track=this.stream.getVideoTracks()[0];
+    try{
+      const caps=this.track.getCapabilities?this.track.getCapabilities():{}; const adv={};
+      if(caps.focusMode&&caps.focusMode.includes('continuous')) adv.focusMode='continuous';
+      if(caps.zoom&&caps.zoom.max>=2) adv.zoom=1.6; // léger zoom : rester à distance = image nette
+      if(Object.keys(adv).length) this.track.applyConstraints({advanced:[adv]}).catch(()=>{});
+      if(caps.torch){ const b=this.box.querySelector('.camtorch'); b.classList.remove('hidden'); let t=false;
+        b.onclick=()=>{ t=!t; this.track.applyConstraints({advanced:[{torch:t}]}).catch(()=>{}); b.classList.toggle('on',t); }; }
+    }catch(e){}
+    this.canvas=document.createElement('canvas'); this.ctx=this.canvas.getContext('2d',{willReadFrequently:true});
+    this.on=true; this.loop(det);
+  }
+  async loop(det){
+    while(this.on){
+      const v=this.video;
+      if(!this.paused && v && v.readyState>=2 && v.videoWidth){
+        try{
+          // on analyse la zone du cadre (centre de l'image), réduite à 1280 px de large
+          const vw=v.videoWidth, vh=v.videoHeight, cw=Math.round(vw*0.9), ch=Math.round(vh*0.6), sx=Math.round((vw-cw)/2), sy=Math.round((vh-ch)/2);
+          const sc=Math.min(1,1280/cw); this.canvas.width=Math.round(cw*sc); this.canvas.height=Math.round(ch*sc);
+          this.ctx.drawImage(v,sx,sy,cw,ch,0,0,this.canvas.width,this.canvas.height);
+          const r=await det.detect(this.canvas);
+          if(r.length && this.on && !this.paused) this.onCode(r[0].rawValue,{format:{formatName:FMT_LABEL[r[0].format]||r[0].format}});
+        }catch(e){}
+      }
+      await new Promise(res=>setTimeout(res,80));
+    }
+  }
+  pause(){ this.paused=true; } resume(){ this.paused=false; }
+  stop(){ this.on=false; try{ this.stream&&this.stream.getTracks().forEach(t=>t.stop()); }catch(e){} this.box.innerHTML=''; }
+}
 async function toggleScan(){ S.scanning ? stopScan() : startScan(); }
 async function startScan(){
-  if(!window.Html5Qrcode) return toast('Module de scan non chargé','bad');
+  $('btnScan').textContent='⏳ Démarrage…';
   try{
-    if(!S.scanner){
-      const F=Html5QrcodeSupportedFormats;
-      S.scanner = new Html5Qrcode('reader',{formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39],experimentalFeatures:{useBarCodeDetectorIfSupported:true},verbose:false});
-    }
-    await S.scanner.start({facingMode:'environment'},SCAN_CFG(),onScan,()=>{}); boostCamera('reader');
+    S.cam=new Cam('reader',onScan); await S.cam.start();
     S.scanning=true; $('btnScan').textContent='⏹ Arrêter le scan';
-  }catch(e){ toast('Caméra indisponible : '+(e.message||e),'bad'); }
+  }catch(e){ S.scanning=false; $('btnScan').textContent='📷 Scanner un code-barres'; toast('Caméra ou lecteur indisponible : '+(e.message||e),'bad'); }
 }
 async function stopScan(){
-  if(S.scanner && S.scanning){ try{ await S.scanner.stop(); }catch(e){} }
+  if(S.cam){ S.cam.stop(); S.cam=null; }
   S.scanning=false; if($('btnScan')) $('btnScan').textContent='📷 Scanner un code-barres';
 }
 let TESTS=[];
@@ -810,57 +866,35 @@ function onTestScan(txt, result){
   TESTS.unshift({raw:String(txt),format:fmtName,t:Date.now()}); TESTS=TESTS.slice(0,10);
   beep(true); renderTest();
 }
-// Caméra : haute résolution + mise au point continue quand le téléphone le permet
-function SCAN_CFG(){
-  return {fps:15, aspectRatio:1.333,
-    qrbox:(w,h)=>({width:Math.floor(Math.min(w*0.9,420)),height:Math.floor(Math.min(h*0.5,200))}),
-    videoConstraints:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080},advanced:[{focusMode:'continuous'}]}};
-}
-function boostCamera(id){
-  setTimeout(()=>{ try{
-    const v=document.querySelector('#'+id+' video'); const tr=v&&v.srcObject&&v.srcObject.getVideoTracks()[0]; if(!tr) return;
-    const caps=tr.getCapabilities?tr.getCapabilities():{}; const adv={};
-    if(caps.focusMode&&caps.focusMode.includes('continuous')) adv.focusMode='continuous';
-    if(caps.zoom&&caps.zoom.max>=1.5) adv.zoom=Math.min(2,caps.zoom.max); // léger zoom : permet de rester plus loin (net)
-    if(Object.keys(adv).length) tr.applyConstraints({advanced:[adv]}).catch(()=>{});
-  }catch(e){} },600);
-}
 // Lecture d'un code-barres sur une photo prise avec l'appareil photo du téléphone
-let FSC=null;
 async function photoScan(input,mode){
   const file=input.files&&input.files[0]; input.value=''; if(!file) return;
-  if(!window.Html5Qrcode) return toast('Module de scan non chargé','bad');
   toast('Lecture de la photo…');
   try{
+    const det=await getDetector();
     const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=URL.createObjectURL(file);});
-    const tries=[1600,1000,2400];
-    let out=null, lastErr=null;
-    if(!FSC){ const F=Html5QrcodeSupportedFormats; FSC=new Html5Qrcode('fileReader',{formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39,F.ITF,F.QR_CODE],verbose:false}); }
-    for(const max of tries){
+    let out=null;
+    for(const max of [1600,2400,1000,3200]){
       const r=Math.min(1,max/Math.max(img.width,img.height));
       const c=document.createElement('canvas'); c.width=Math.round(img.width*r); c.height=Math.round(img.height*r);
       c.getContext('2d').drawImage(img,0,0,c.width,c.height);
-      const blob=await new Promise(res=>c.toBlob(res,'image/jpeg',0.92));
-      try{ out=await FSC.scanFileV2(new File([blob],'p.jpg',{type:'image/jpeg'}),false); break; }catch(e){ lastErr=e; }
+      try{ const res=await det.detect(c); if(res.length){ out=res[0]; break; } }catch(e){}
     }
     URL.revokeObjectURL(img.src);
-    if(!out) throw lastErr||new Error('rien');
-    const txt=out.decodedText;
-    if(mode==='test') onTestScan(txt,out); else { S.lastCode=''; onScan(txt); }
+    if(!out) throw new Error('rien');
+    const info={format:{formatName:FMT_LABEL[out.format]||out.format}};
+    if(mode==='test') onTestScan(out.rawValue,info); else { S.lastCode=''; onScan(out.rawValue); }
   }catch(e){ beep(false); toast('Aucun code-barres trouvé sur la photo. Cadrez le code bien à plat, net et assez grand.','bad'); }
 }
-let TSC=null, tScanning=false;
+let TCAM=null, tScanning=false;
 async function toggleTestScan(){
   if(tScanning) return stopTestScan();
-  if(!window.Html5Qrcode) return toast('Module de scan non chargé','bad');
-  try{
-    if(!TSC){ const F=Html5QrcodeSupportedFormats; TSC=new Html5Qrcode('readerT',{formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39,F.ITF,F.QR_CODE],experimentalFeatures:{useBarCodeDetectorIfSupported:true},verbose:false}); }
-    await TSC.start({facingMode:'environment'},SCAN_CFG(),onTestScan,()=>{}); boostCamera('readerT');
-    tScanning=true; $('btnScanT').textContent='⏹ Arrêter';
-  }catch(e){ toast('Caméra indisponible : '+(e.message||e),'bad'); }
+  $('btnScanT').textContent='⏳ Démarrage…';
+  try{ TCAM=new Cam('readerT',onTestScan); await TCAM.start(); tScanning=true; $('btnScanT').textContent='⏹ Arrêter'; }
+  catch(e){ tScanning=false; $('btnScanT').textContent='📷 Scanner un code-barres'; toast('Caméra ou lecteur indisponible : '+(e.message||e),'bad'); }
 }
 async function stopTestScan(){
-  if(TSC && tScanning){ try{ await TSC.stop(); }catch(e){} }
+  if(TCAM){ TCAM.stop(); TCAM=null; }
   tScanning=false; if($('btnScanT')) $('btnScanT').textContent='📷 Scanner un code-barres';
 }
 function testManual(){ const v=$('tManual').value.trim(); if(!v) return; $('tManual').value=''; TESTS.unshift({raw:v,format:'',t:Date.now()}); TESTS=TESTS.slice(0,10); renderTest(); }
@@ -897,7 +931,7 @@ function onScan(txt){
     }
   } else {
     beep(!a?false:d.others.length?'warn':true);
-    if(S.scanner && S.scanning){ try{S.scanner.pause(true)}catch(e){} }
+    if(S.cam && S.scanning) S.cam.pause();
     openArt(k);
   }
 }
@@ -946,7 +980,7 @@ function simScan(){
   const a=S.arts[Math.floor(Math.random()*S.arts.length)]; S.lastCode=''; onScan(a.ean);
 }
 function closeArt(){ hide('artCard'); S.cur=null; resumeScan(); }
-function resumeScan(){ if(S.scanner && S.scanning){ try{S.scanner.resume()}catch(e){} } }
+function resumeScan(){ if(S.cam && S.scanning) S.cam.resume(); }
 function bump(d){ const i=$('aQty'); i.value=Math.max(0,(+i.value||0)+d); }
 $('aQty').addEventListener('keydown',e=>{if(e.key==='Enter')saveCount()});
 function saveCount(){
