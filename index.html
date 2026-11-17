@@ -279,7 +279,7 @@ tr.trhors td{background:#fff0e3}
 
     <div class="card" style="margin-top:12px">
       <div class="row">
-        <input id="q" type="search" placeholder="Libellé, dimension, marque, EAN… (mots dans n'importe quel ordre)" oninput="searchArt()" inputmode="search" enterkeyhint="search">
+        <input id="q" type="search" placeholder="EAN, code modèle, dimension, libellé… (n'importe quel ordre)" oninput="searchArt()" inputmode="search" enterkeyhint="search">
       </div>
       <div id="res" class="list res small"></div>
     </div>
@@ -558,7 +558,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v18.11 00:35';
+const APP_V='v18.11 00:50';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -943,7 +943,7 @@ function renderRecList(){
     const head = x.t ? 'Dans l\'ordre du 1er comptage (plus ancien en haut)' : 'Jamais comptés (stock attendu)';
     const hd = head!==lastHead ? `<div class="small" style="margin:8px 0 2px;font-weight:800;color:${x.t?'#7a5b00':'#7b3fe4'}">${esc(head)}</div>` : ''; lastHead=head;
     return hd+`<div class="it ${x.t?'':'notcounted'}" onclick="openArtManual('${esc(x.a.ean)}')"><span class="brandsm">${brandHtml(brandOf(x.a))}</span>
-      <div class="t"><div><b>${esc(x.a.designation)}</b></div><div class="muted">${x.t?'<b>'+hms(x.t)+'</b> · ':''}${esc(x.depot?lieu(x.depot,x.rack):'emplacement inconnu')}${fmtDim(x.a.dimension)?' · <b>'+esc(fmtDim(x.a.dimension))+'</b>':''}${x.a.reference?' · Réf. '+esc(x.a.reference):''}</div></div>
+      <div class="t"><div><b>${esc(x.a.designation)}</b></div><div class="muted">${x.t?'<b>'+hms(x.t)+'</b> · ':''}${esc(x.depot?lieu(x.depot,x.rack):'emplacement inconnu')}${fmtDim(x.a.dimension)?' · <b>'+esc(fmtDim(x.a.dimension))+'</b>':''}${x.a.reference?' · Réf. <b>'+esc(x.a.reference)+'</b>':''}</div></div>
       <span class="pill ${x.t?'warn':'test'}">${x.t?'à recompter':'non compté'}</span></div>`; }).join('')
     : `<div class="muted" style="padding:8px 0">Tout est recompté 👍 (${done})</div>`;
 }
@@ -968,7 +968,7 @@ function renderMine(){
      const hf=(S.byEan.get(c.ean)||{}).hors_feuille;
      return `<div class="it ${hf?'horsrow':''}">
      <div class="q">${fmt(c.qte)}</div>
-     <div class="t"><div>${esc(artLabel(c.ean))}${hf?' <span class="pill horsp">📦 hors feuille</span>':''}</div><div class="muted"><b>${hms(c.created_at)}</b>${c.source==='manuel'?' ✋':''} · ${esc(c.compteur||'?')} · ${esc(lieu(c.zone,c.rack))}${c._p?' · <span class="neg">en attente</span>':''}</div></div>
+     <div class="t"><div>${esc(artLabel(c.ean))}${hf?' <span class="pill horsp">📦 hors feuille</span>':''}</div><div class="muted">${(()=>{const ar=S.byEan.get(c.ean)||{}; return [ar.reference?'Réf. <b>'+esc(ar.reference)+'</b>':'', fmtDim(ar.dimension)?esc(fmtDim(ar.dimension)):''].filter(Boolean).join(' · ');})()}</div><div class="muted"><b>${hms(c.created_at)}</b>${c.source==='manuel'?' ✋':''} · ${esc(c.compteur||'?')} · ${esc(lieu(c.zone,c.rack))}${c._p?' · <span class="neg">en attente</span>':''}</div></div>
      ${c._p||!mineOk?'':`<button class="btn sm" onclick="editCount(${c.id})" title="Corriger la quantité">✏️</button><button class="btn sm red" onclick="delCount(${c.id})" title="Supprimer">✕</button>`}</div>`; }).join('')
      + (all.length>shown.length?`<button class="btn sm" style="width:100%;margin-top:8px" onclick="MINE_LIMIT+=100;renderMine()">Afficher plus (${all.length-shown.length} restantes)</button>`:'')
      : '<div class="muted">Aucune saisie pour l\'instant.</div>';
@@ -1021,7 +1021,9 @@ function searchArt(){
   if(q.trim().length<2){box.innerHTML='';return;}
   // dimension dictée/tapée (ex. 225/65R17, 225 65 17) : les articles de cette dimension exacte d'abord
   const dm=q.replace(/\s+/g,' ').match(/(\d{3})\s*[\/ ]?\s*(\d{2})\s*z?r?\s*(\d{2})/i), dim=dm?dm[1]+dm[2]+dm[3]:'';
+  const rq=refKey(q);
   const all=S.arts.filter(a=>matchArt(a,q)).sort((a,b)=>
+    ((refKey(b.reference)===rq)-(refKey(a.reference)===rq)) ||
     ((dim&&String(b.dimension)===dim)-(dim&&String(a.dimension)===dim)) ||
     (countedAny(a.ean)-countedAny(b.ean)) ||
     String(a.designation).localeCompare(String(b.designation),'fr'));
@@ -1346,11 +1348,26 @@ async function createArt(){
   S.arts.push(data); S.byEan.set(data.ean,data); LS.set('arts_'+S.inv,S.arts);
   toast('Article créé','ok'); openArt(data.ean);
 }
-// Entrée dans la recherche avec un code numérique (clavier ou douchette) = scan
-$('q').addEventListener('keydown',e=>{
+// Entrée dans la recherche avec un code : EAN (scan / douchette) ou code modèle (référence fabricant)
+const refKey=s=>String(s??'').replace(/\s/g,'').toUpperCase();
+$('q').addEventListener('keydown',async e=>{
   if(e.key!=='Enter') return;
-  const v=$('q').value.replace(/\s/g,'');
-  if(/^\d{6,14}$/.test(v)){ e.preventDefault(); $('q').value=''; $('res').innerHTML=''; S.lastCode=''; onScan(v); }
+  const v=$('q').value.replace(/\s/g,''); if(!/^[0-9A-Za-z]{4,14}$/.test(v)) return;
+  e.preventDefault();
+  const k=keyEan(v);
+  if(/^\d+$/.test(v) && S.byEan.has(k)){ $('q').value=''; $('res').innerHTML=''; S.lastCode=''; return onScan(v); }       // EAN connu
+  const byRef=S.arts.filter(a=>refKey(a.reference)===refKey(v));
+  if(byRef.length===1){ $('q').value=''; $('res').innerHTML=''; return openArtManual(byRef[0].ean); }                       // code modèle
+  if(byRef.length>1){ searchArt(); return toast(byRef.length+' articles avec ce code modèle : choisissez','ok'); }
+  // pas dans la feuille : base articles (EAN puis code modèle) -> hors feuille
+  try{
+    let c=null;
+    if(/^\d{8,14}$/.test(v)){ const {data}=await sb.from('catalogue').select('*').eq('ean',k).limit(1); c=data&&data[0]; }
+    if(!c){ const {data}=await sb.from('catalogue').select('*').eq('reference',v).limit(2); if(data&&data.length===1) c=data[0]; }
+    if(c){ $('q').value=''; $('res').innerHTML=''; SRC='manuel'; openArt(c.ean); return; }
+  }catch(err){}
+  if(/^\d{8,14}$/.test(v)){ $('q').value=''; $('res').innerHTML=''; S.lastCode=''; return onScan(v); }                    // EAN inconnu : création
+  toast('Aucun article avec ce code (EAN ou code modèle)','bad');
 });
 function toggleExpected(){ if($('expBox').classList.contains('hidden')) showExpected(); else hide('expBox'); }
 async function showExpected(){
