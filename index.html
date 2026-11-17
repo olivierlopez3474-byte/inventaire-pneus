@@ -375,6 +375,7 @@ tr.trhors td{background:#fff0e3}
   <button id="btnScanT" class="btn dark scanbtn" onclick="toggleTestScan()">📷 Scanner un code-barres</button>
   <div class="small muted" style="margin-top:6px;text-align:center">Image floue ? Reculez à 20–30 cm, ou touchez l'image pour forcer la lecture.</div>
   <button class="btn" style="width:100%;margin-top:10px" onclick="testSimulate()">🧪 Simuler un scan (article au hasard de l'inventaire)</button>
+  <button class="btn" style="width:100%;margin-top:10px" onclick="showLabels()">🏷 Codes-barres de test (à afficher sur le PC ou imprimer)</button>
   <div class="row" style="margin-top:10px"><input id="tManual" type="text" inputmode="numeric" placeholder="ou tapez un code pour le vérifier" enterkeyhint="done"><button class="btn" style="flex:0" onclick="testManual()">OK</button></div>
   <div class="card" style="margin-top:12px">
     <div id="testList"></div>
@@ -577,7 +578,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v18.11 02:10';
+const APP_V='v18.11 02:15';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -2055,15 +2056,22 @@ async function newEmptyInv(){
   if(error) return toast(error.message,'bad');
   toast('Inventaire créé : scannez des objets sur le téléphone et créez-les à la volée','ok'); initBureau(data.id);
 }
-function showLabels(){
-  const rows=curRows().filter(r=>r.art && /^\d{7,13}$/.test(r.ean)).slice(0,40);
-  if(!rows.length) return toast('Aucun EAN à afficher dans cette vue','bad');
-  $('lbGrid').innerHTML=rows.map((r,i)=>`<div class="lb"><svg id="bc${i}"></svg><div>${esc(r.des)}</div><div class="muted">stock ${fmt(r.theo)}</div></div>`).join('');
+// Codes-barres de test (page 🧪 Test lecteur) : articles de l'inventaire actif ⭐, sans stock affiché
+async function showLabels(){
+  let arts=(S.arts&&S.arts.length)?S.arts:null;
+  if(!arts){
+    const {data:inv}=await sb.from('inventaires').select('id').eq('actif',true).limit(1);
+    if(!inv||!inv.length) return toast('Aucun inventaire actif ⭐','bad');
+    const {data}=await sb.from('articles').select('ean,designation,dimension').eq('inventaire_id',inv[0].id).limit(200);
+    arts=data||[];
+  }
+  const rows=arts.filter(a=>/^\d{7,13}$/.test(a.ean||'')).slice(0,40);
+  if(!rows.length) return toast('Aucun EAN à afficher','bad');
+  $('lbGrid').innerHTML=rows.map((a,i)=>`<div class="lb"><svg id="bc${i}"></svg><div>${esc(a.designation||'')}</div><div class="muted">${esc(fmtDim(a.dimension)||'')}</div></div>`).join('');
   openPanel('labels');
-  rows.forEach((r,i)=>{
-    const code=r.ean.padStart(13,'0');
-    try{ JsBarcode('#bc'+i,code,{format:'EAN13',height:70,fontSize:14,margin:6}); }
-    catch(e){ try{JsBarcode('#bc'+i,r.ean,{format:'CODE128',height:70})}catch(_){} }
+  rows.forEach((a,i)=>{
+    try{ JsBarcode('#bc'+i,a.ean.padStart(13,'0'),{format:'EAN13',height:70,fontSize:14,margin:6}); }
+    catch(e){ try{JsBarcode('#bc'+i,a.ean,{format:'CODE128',height:70})}catch(_){} }
   });
 }
 
