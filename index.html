@@ -99,6 +99,15 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 .prev{overflow:auto;max-height:240px;font-size:12px}
 .prev td,.prev th{white-space:nowrap;padding:4px 8px}
 .help{background:#fffaf0;border:1px solid #f3e2b6;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:10px}
+.brandbig{margin-bottom:8px;min-height:0}
+.brandbig img{max-height:48px;max-width:180px;object-fit:contain;display:block}
+.brandsm img{height:20px;max-width:70px;object-fit:contain;vertical-align:middle}
+.bpill{display:inline-block;padding:3px 10px;border-radius:6px;background:var(--ink);color:#fff;font-weight:800;letter-spacing:.5px;font-size:13px}
+.brandsm .bpill{font-size:10px;padding:1px 6px}
+.blist{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.bcard{border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.bcard .lg{height:64px;display:flex;align-items:center;justify-content:center;background:#faf9f6;border-radius:8px}
+.bcard .lg img{max-height:56px;max-width:90%;object-fit:contain}
 @media (max-width:700px){main{padding:10px} .hide-m{display:none}}
 </style>
 </head>
@@ -213,6 +222,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
     <div id="artCard" class="card art hidden">
       <div class="row" style="align-items:flex-start">
         <div style="flex:1">
+          <div id="aLogo" class="brandbig"></div>
           <h3 id="aName"></h3>
           <div class="small muted" id="aMeta"></div>
           <div class="small" id="aInfo" style="margin-top:6px"></div>
@@ -251,6 +261,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
       <select id="bInv" style="max-width:340px" onchange="loadBureau()"></select>
       <span id="bStatus"></span>
       <span style="flex:1"></span>
+      <button class="btn" onclick="showBrands()">🏷 Marques & logos</button>
       <button class="btn" onclick="newEmptyInv()">🧪 Inventaire vide (test)</button>
       <button class="btn pri" onclick="showImport()">＋ Nouvel inventaire (import Excel)</button>
     </div>
@@ -273,6 +284,21 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
         <button class="btn pri" style="flex:0;white-space:nowrap" id="iGo" onclick="doImport()">Importer et créer l'inventaire</button>
       </div>
     </div>
+  </div>
+
+  <!-- Marques & logos -->
+  <div id="brandBox" class="card hidden">
+    <div class="toolbar">
+      <h3 style="margin:0">Marques & logos</h3>
+      <span style="flex:1"></span>
+      <button class="btn sm" onclick="hide('brandBox')">Fermer</button>
+    </div>
+    <p class="small muted" style="margin-top:0">Chargez le logo de chaque fournisseur (PNG, JPG, SVG — fichier officiel revendeur ou capture d'écran). Il s'affichera sur le téléphone quand un pneu de cette marque est scanné. La liste reprend les marques de l'inventaire sélectionné.</p>
+    <div class="row" style="max-width:460px;margin-bottom:12px">
+      <input id="bNew" type="text" placeholder="Ajouter une marque (ex. CONTINENTAL)">
+      <button class="btn" style="flex:0;white-space:nowrap" onclick="addBrand()">Ajouter</button>
+    </div>
+    <div class="blist" id="bList"></div>
   </div>
 
   <div id="bEmpty" class="card hidden">Aucun inventaire. Cliquez sur « Nouvel inventaire » pour importer votre fichier Excel.</div>
@@ -401,7 +427,31 @@ async function startCount(silent){
   S.inv=inv; S.who=who; S.zone=zone;
   $('cInv').textContent=$('sInv').selectedOptions[0].text; $('cWho').textContent='👤 '+who; $('cZone').textContent='📍 '+zone;
   hide('setup'); show('counting');
+  loadLogos();
   await loadArts(); await loadMine(); subscribeArts();
+}
+
+/* ---- marques & logos ---- */
+let LOGOS = LS.get('logos',{});   // NOM_MARQUE -> url
+const BRAND_ALIASES = {MIC:'MICHELIN',MICH:'MICHELIN',BFG:'BFGOODRICH',CONT:'CONTINENTAL',CONTI:'CONTINENTAL',BRI:'BRIDGESTONE',BRID:'BRIDGESTONE',GY:'GOODYEAR',GDY:'GOODYEAR',PIR:'PIRELLI',PIRE:'PIRELLI',DUN:'DUNLOP',HAN:'HANKOOK',HANK:'HANKOOK',KLE:'KLEBER',KLEB:'KLEBER',FIR:'FIRESTONE',NOK:'NOKIAN',YOK:'YOKOHAMA',UNI:'UNIROYAL',FAL:'FALKEN',TOY:'TOYO',KUM:'KUMHO',NEX:'NEXEN',VRE:'VREDESTEIN',SEM:'SEMPERIT'};
+function brandOf(a){
+  if(!a) return '';
+  const m=String(a.marque||'').trim(); if(m) return m.toUpperCase();
+  const w=String(a.designation||'').toUpperCase().split(/\s+/);
+  const t=(w[0]==='PN'?w[1]:w[0])||'';
+  return BRAND_ALIASES[t]||'';
+}
+function brandHtml(nom){
+  if(!nom) return '';
+  const u=LOGOS[nom];
+  const pill=`<span class="bpill"${u?' style="display:none"':''}>${esc(nom)}</span>`;
+  return u ? `<img src="${esc(u)}" alt="${esc(nom)}" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-block'">${pill}` : pill;
+}
+async function loadLogos(){
+  const {data,error}=await sb.from('marques').select('nom,logo_url');
+  if(error) return;
+  LOGOS={}; data.forEach(r=>{ if(r.logo_url) LOGOS[r.nom]=r.logo_url; });
+  LS.set('logos',LOGOS);
 }
 async function loadArts(){
   try{
@@ -456,7 +506,7 @@ function searchArt(){
     const hs=squash(hay);
     return hs.includes(t) || words.every(w=>hay.includes(w)||hs.includes(squash(w)));
   }).slice(0,40);
-  box.innerHTML = r.length? r.map(a=>`<div class="it" onclick="openArt('${esc(a.ean)}')"><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${esc(a.ean)}${a.reference?' · '+esc(a.reference):''}</div></div><span class="pill">stock ${fmt(a.qte_theorique)}</span></div>`).join('') : '<div class="muted" style="padding:8px 0">Aucun résultat</div>';
+  box.innerHTML = r.length? r.map(a=>`<div class="it" onclick="openArt('${esc(a.ean)}')"><span class="brandsm">${brandHtml(brandOf(a))}</span><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${esc(a.ean)}${a.reference?' · '+esc(a.reference):''}</div></div><span class="pill">stock ${fmt(a.qte_theorique)}</span></div>`).join('') : '<div class="muted" style="padding:8px 0">Aucun résultat</div>';
 }
 
 /* scan */
@@ -494,6 +544,7 @@ function onScan(txt){
 function openArt(ean){
   const a=S.byEan.get(ean); S.cur=ean;
   $('artCard').classList.toggle('unk',!a);
+  $('aLogo').innerHTML = brandHtml(brandOf(a));
   $('aName').textContent = a? a.designation : 'Code non référencé dans le fichier';
   $('aMeta').textContent = 'EAN '+ean + (a&&a.reference?' · réf. '+a.reference:'');
   const already = S.mine.concat(Q).filter(c=>c.ean===ean&&c.inventaire_id===S.inv).reduce((s,c)=>s+Number(c.qte),0);
@@ -803,6 +854,73 @@ async function doImport(){
     toast(`${rows.length} articles importés`,'ok'); hide('importBox'); initBureau(inv.id);
   }catch(e){ toast('Erreur : '+e.message,'bad'); }
   $('iGo').disabled=false; $('iGo').textContent="Importer et créer l'inventaire";
+}
+
+/* ---- marques (bureau) ---- */
+let BR_EXTRA = [];
+async function showBrands(){
+  show('brandBox'); $('bList').innerHTML='<div class="muted">Chargement…</div>';
+  const {data,error}=await sb.from('marques').select('nom,logo_url').order('nom');
+  if(error) return toast(error.message,'bad');
+  LOGOS={}; data.forEach(r=>{ if(r.logo_url) LOGOS[r.nom]=r.logo_url; }); LS.set('logos',LOGOS);
+  const counts={};
+  (B.arts||[]).forEach(a=>{ const n=brandOf(a); if(n) counts[n]=(counts[n]||0)+1; });
+  const names=[...new Set([...Object.keys(counts),...data.map(r=>r.nom),...BR_EXTRA])].sort();
+  $('bList').innerHTML = names.length ? names.map(n=>`<div class="bcard">
+      <div class="lg">${LOGOS[n]?`<img src="${esc(LOGOS[n])}" alt="${esc(n)}">`:'<span class="muted small">Pas de logo</span>'}</div>
+      <div><b>${esc(n)}</b> <span class="muted small">${counts[n]?fmt(counts[n])+' article(s)':''}</span></div>
+      <div class="row">
+        <label class="btn sm pri" style="text-align:center">${LOGOS[n]?'Changer':'Choisir une image'}<input type="file" accept="image/*" hidden onchange="upLogo(this.dataset.n,this.files[0])" data-n="${esc(n)}"></label>
+        ${LOGOS[n]?`<button class="btn sm red" style="flex:0" data-n="${esc(n)}" onclick="delLogo(this.dataset.n)">Retirer</button>`:''}
+      </div></div>`).join('') : '<div class="muted">Aucune marque trouvée. Ajoutez-en une ci-dessus.</div>';
+}
+function addBrand(){
+  const n=$('bNew').value.trim().toUpperCase(); if(!n) return;
+  if(!BR_EXTRA.includes(n)) BR_EXTRA.push(n);
+  $('bNew').value=''; showBrands();
+}
+function resizeImage(file,maxW=480,maxH=200){
+  return new Promise((res,rej)=>{
+    if(file.type==='image/svg+xml') return res(file);
+    const img=new Image(); const url=URL.createObjectURL(file);
+    img.onload=()=>{
+      const r=Math.min(1,maxW/img.width,maxH/img.height);
+      const c=document.createElement('canvas'); c.width=Math.round(img.width*r); c.height=Math.round(img.height*r);
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+      URL.revokeObjectURL(url); c.toBlob(b=>b?res(b):rej(new Error('Image illisible')),'image/png');
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('Image illisible'))};
+    img.src=url;
+  });
+}
+async function upLogo(nom,file){
+  if(!file) return;
+  try{
+    toast('Envoi du logo…');
+    const blob=await resizeImage(file);
+    const ext=blob.type==='image/svg+xml'?'svg':'png';
+    const path=`${squash(nom)||'marque'}-${Date.now()}.${ext}`;
+    const {error:e1}=await sb.storage.from('logos').upload(path,blob,{contentType:blob.type||'image/png',upsert:false});
+    if(e1) throw e1;
+    const url=sb.storage.from('logos').getPublicUrl(path).data.publicUrl;
+    const old=LOGOS[nom];
+    const {error:e2}=await sb.from('marques').upsert({nom,logo_url:url,updated_at:new Date().toISOString()});
+    if(e2) throw e2;
+    if(old) removeLogoFile(old);
+    toast('Logo enregistré pour '+nom,'ok'); showBrands();
+  }catch(e){ toast('Erreur : '+(e.message||e),'bad'); }
+}
+function removeLogoFile(url){
+  const p=String(url).split('/storage/v1/object/public/logos/')[1];
+  if(p) sb.storage.from('logos').remove([decodeURIComponent(p)]).catch(()=>{});
+}
+async function delLogo(nom){
+  if(!confirm('Retirer le logo de '+nom+' ?')) return;
+  const old=LOGOS[nom];
+  const {error}=await sb.from('marques').update({logo_url:null,updated_at:new Date().toISOString()}).eq('nom',nom);
+  if(error) return toast(error.message,'bad');
+  if(old) removeLogoFile(old);
+  showBrands();
 }
 
 /* ---- test ---- */
