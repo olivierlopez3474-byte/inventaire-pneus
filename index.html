@@ -143,6 +143,8 @@ body.noadmin #toast{bottom:24px!important}
 .opbar .invpill.test{background:#7b3fe4}
 #vBureau .toolbar{row-gap:8px}
 @media (max-width:700px){header.top{padding:8px 12px} #vBureau .toolbar .btn{padding:8px 10px;font-size:13px} .kpi .v{font-size:20px}}
+.it.notcounted{background:#f1e9fd;border-radius:8px;padding-left:6px;padding-right:6px}
+.pill.test{background:#e6dafb;color:#5a2bb0}
 .dupred{background:#fde3e1!important;border:2px solid var(--bad)!important;color:#7a1d16!important;font-size:14px}
 #saveChoice .btn small{font-weight:600;opacity:.85;font-size:12px}
 .dupw{background:#fdf0d5;border:1px solid #f0cf86;color:#7a4a00;border-radius:10px;padding:10px 12px;margin-bottom:6px}
@@ -328,7 +330,7 @@ body.noadmin #toast{bottom:24px!important}
       <div class="row"><b id="listTitle">Articles comptés</b><span class="muted small" style="text-align:right" id="myTotal"></span></div>
       <div id="mine" class="list small"></div>
       <div id="recBox" class="hidden">
-        <div class="small" style="margin:4px 0 8px;padding:8px 10px;background:#fff4cc;border-radius:8px">🔁 <b>Recomptage lancé par l'admin</b> — articles à recompter, dans le même ordre que le 1er comptage (plus récent en haut). Comptez ce que vous voyez : la quantité attendue n'est volontairement pas affichée. <span id="recN"></span></div>
+        <div class="small" style="margin:4px 0 8px;padding:8px 10px;background:#fff4cc;border-radius:8px">🔁 <b>Recomptage lancé par l'admin</b> — articles à recompter, dans le même ordre que le 1er comptage (plus ancien en haut). Les articles jamais comptés sont en violet, en bas. Comptez ce que vous voyez : la quantité attendue n'est volontairement pas affichée. <span id="recN"></span></div>
         <div class="list small" id="recList"></div>
       </div>
     </div>
@@ -538,7 +540,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 23:50';
+const APP_V='v17.11 23:55';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -890,27 +892,26 @@ function recItems(){
     const p=lc?[lc.zone||'',lc.rack||'']:(places[0]||['','']);
     return {a, theo, c1, counted, done: a.ean in rec, rc: rec[a.ean], depot:p[0], rack:p[1], t: lc?lc.created_at:''};
   }).filter(Boolean).sort((x,y)=>
-    // même ordre que le 1er comptage : du plus récent au plus ancien ; jamais comptés ensuite (par libellé) ; recomptés en fin
+    // même trajet que le 1er comptage : du plus ancien au plus récent ; jamais comptés ensuite (par libellé)
     (x.done-y.done) ||
     ((x.t?0:1)-(y.t?0:1)) ||
-    (x.t&&y.t ? new Date(y.t)-new Date(x.t) : 0) ||
+    (x.t&&y.t ? new Date(x.t)-new Date(y.t) : 0) ||
     String(x.a.designation).localeCompare(String(y.a.designation),'fr'));
 }
 function renderRecList(){
   const on=$('recMode').checked;
   if(!on){ hide('recBox'); show('mine'); return renderMine(); }
   hide('mine'); show('recBox'); $('listTitle').textContent='🔁 Recomptage — articles en écart';
-  const it=recItems(), left=it.filter(x=>!x.done).length;
-  $('recN').innerHTML = ''; $('myTotal').innerHTML = `<b>${left}</b> à recompter · ${it.length-left} fait(s)`;
+  const it=recItems(), todo=it.filter(x=>!x.done), done=it.length-todo.length; // à l'aveugle : ni stock, ni 1er comptage, ni écart
+  $('recN').innerHTML=''; $('myTotal').innerHTML = `<b>${todo.length}</b> à recompter · ${done} fait(s)`;
   let lastHead='';
-  $('recList').innerHTML = it.length ? it.map(x=>{
-    const head = x.done ? '✓ Déjà recomptés' : x.t ? 'Dans l\'ordre du 1er comptage (plus récent en haut)' : 'Jamais comptés';
-    const h = head!==lastHead ? `<div class="small" style="margin:8px 0 2px;font-weight:800;color:#7a5b00">${esc(head)}</div>` : ''; lastHead=head;
-    const ec = x.c1-x.theo;
-    return h+`<div class="it" style="${x.done?'opacity:.55':''}" onclick="openArt('${esc(x.a.ean)}')"><span class="brandsm">${brandHtml(brandOf(x.a))}</span>
+  $('recList').innerHTML = todo.length ? todo.map(x=>{
+    const head = x.t ? 'Dans l\'ordre du 1er comptage (plus ancien en haut)' : 'Jamais comptés (stock attendu)';
+    const hd = head!==lastHead ? `<div class="small" style="margin:8px 0 2px;font-weight:800;color:${x.t?'#7a5b00':'#7b3fe4'}">${esc(head)}</div>` : ''; lastHead=head;
+    return hd+`<div class="it ${x.t?'':'notcounted'}" onclick="openArt('${esc(x.a.ean)}')"><span class="brandsm">${brandHtml(brandOf(x.a))}</span>
       <div class="t"><div><b>${esc(x.a.designation)}</b></div><div class="muted">${x.t?'<b>'+hms(x.t)+'</b> · ':''}${esc(x.depot?lieu(x.depot,x.rack):'emplacement inconnu')}${x.a.reference?' · Réf. '+esc(x.a.reference):''}</div></div>
-      <span class="pill ${x.done?'ok':'warn'}">${x.done?'✓ fait':'à recompter'}</span></div>`; }).join('')
-    : '<div class="muted" style="padding:8px 0">Aucun écart 👍</div>';
+      <span class="pill ${x.t?'warn':'test'}">${x.t?'à recompter':'non compté'}</span></div>`; }).join('')
+    : `<div class="muted" style="padding:8px 0">Tout est recompté 👍 (${done})</div>`;
 }
 async function loadMine(){
   const {data} = await sb.from('comptages').select('*').eq('inventaire_id',S.inv).eq('compteur',S.who).order('created_at',{ascending:false}).limit(30);
