@@ -511,7 +511,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 19:50';
+const APP_V='v17.11 20:05';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 function go(v,push=true){
@@ -564,13 +564,24 @@ async function initSaisie(){
   if(error) return toast(error.message,'bad');
   if(!data.length){ show('noInv'); hide('setup'); hide('counting'); return; }
   hide('noInv');
-  $('sInv').innerHTML = data.map(i=>`<option value="${i.id}">${esc(i.nom)}</option>`).join('');
+  // l'inventaire actif ⭐ en premier, puis les autres (du plus récent au plus ancien)
+  data.sort((a,b)=>(b.actif-a.actif)||new Date(b.created_at)-new Date(a.created_at));
+  S.invs=data;
+  $('sInv').innerHTML = data.map(i=>`<option value="${i.id}">${i.actif?'⭐ ':/test/i.test(i.nom)?'🧪 ':''}${esc(i.nom)}${i.actif?' (actif)':''}</option>`).join('');
   const st = LS.get('setup',{});
+  const act = data.find(i=>i.actif);
+  // par défaut : l'inventaire actif ; on ne garde l'ancien choix que s'il est toujours en cours
+  if(st.inv && st.inv!==act?.id && data.some(i=>i.id==st.inv)){ /* admin sur un test : on garde */ }
+  else if(act) st.inv=act.id;
   if(st.inv && data.some(i=>i.id==st.inv)) $('sInv').value=st.inv;
   await loadRefs();
   fillRefSelects(st);
   show('setup'); hide('counting');
-  if(st.inv && st.who && st.zone && data.some(i=>i.id==st.inv) && st.active && REF.ops.some(o=>o.nom===st.who&&o.actif)){ startCount(true); }
+  // reprise automatique seulement si l'inventaire est toujours ouvert ET autorisé pour cet opérateur
+  const opSaved=REF.ops.find(o=>o.nom===st.who&&o.actif);
+  const invOk = data.some(i=>i.id==st.inv) && (data.find(i=>i.id==st.inv).actif || opSaved?.role==='admin');
+  if(st.inv && st.who && st.zone && st.active && opSaved && invOk){ startCount(true); }
+  else if(st.active && st.inv && !data.some(i=>i.id==st.inv)) toast('L\'inventaire précédent est clôturé : vérifiez l\'inventaire choisi','bad');
   netState(); flushQueue();
 }
 function changeSetup(){ stopScan(); setRole(null); const st=LS.get('setup',{}); st.active=false; LS.set('setup',st); hide('counting'); show('setup'); }
@@ -660,14 +671,19 @@ async function startCount(silent){
     const op=REF.ops.find(o=>o.nom===who);
     if(!op || $('sPin').value!==String(op.code)){ $('sPin').value=''; return toast('Code opérateur incorrect','bad'); }
   }
-  setRole(REF.ops.find(o=>o.nom===who));
+  const opSel=REF.ops.find(o=>o.nom===who), invSel=(S.invs||[]).find(i=>i.id===inv);
+  if(invSel && !invSel.actif){
+    if(opSel?.role!=='admin'){ $('sPin').value=''; return toast('Seul l\'inventaire actif ⭐ est autorisé pour cet opérateur','bad'); }
+    if(silent!==true && !confirm(`« ${invSel.nom} » n'est PAS l'inventaire actif.\n\nCompter quand même dans cet inventaire ?`)) return;
+  }
+  setRole(opSel);
   $('sPin').value='';
   const rack0 = st0.zone===zone ? (st0.rack||'') : '';
   LS.set('setup',{inv,who,zone,rack:rack0,active:true});
   S.inv=inv; S.who=who; S.zone=zone; S.rack=rack0;
-  $('cInv').textContent=$('sInv').selectedOptions[0].text;
-  { const nm=$('sInv').selectedOptions[0].text, test=/test/i.test(nm);
-    $('cInvPill').textContent=(test?'🧪 ':'📋 ')+nm; $('cInvPill').classList.toggle('test',test); } $('cWho').textContent='👤 '+who;
+  $('cInv').textContent=((S.invs||[]).find(i=>i.id===inv)||{}).nom||$('sInv').selectedOptions[0].text;
+  { const iv=(S.invs||[]).find(i=>i.id===inv)||{nom:$('sInv').selectedOptions[0].text}, nm=iv.nom, test=/test/i.test(nm);
+    $('cInvPill').textContent=(iv.actif?'⭐ ':test?'🧪 ':'📋 ')+nm; $('cInvPill').classList.toggle('test',!iv.actif); } $('cWho').textContent='👤 '+who;
   $('cZone').innerHTML=REF.deps.filter(d=>d.actif||d.nom===zone).map(d=>`<option ${d.nom===zone?'selected':''}>${esc(d.nom)}</option>`).join('');
   fillRacks();
   hide('setup'); show('counting');
@@ -1070,6 +1086,13 @@ async function flushQueue(){
       Q=Q.slice(batch.length); LS.set('queue',Q);
       if(S.inv) data.forEach(c=>{ if(c.inventaire_id===S.inv && !S.allC.some(x=>x.id===c.id)) S.allC.push(c); });
       if(S.inv) S.mine = data.filter(c=>c.compteur===S.who&&c.inventaire_id===S.inv).reverse().concat(S.mine).slice(0,30);
+    } else if(/INVENTAIRE_CLOTURE/.test(error.message)){
+      // des saisies visent un inventaire clôturé entre-temps : on les écarte (elles restent visibles dans la console) et on renvoie le reste
+      const {data:cl}=await sb.from('inventaires').select('id').eq('statut','cloture');
+      const closed=new Set((cl||[]).map(x=>x.id)); const lost=Q.filter(x=>closed.has(x.inventaire_id));
+      if(lost.length){ console.warn('Saisies refusées (inventaire clôturé)',lost); Q=Q.filter(x=>!closed.has(x.inventaire_id)); LS.set('queue',Q);
+        toast(`${lost.length} saisie(s) refusée(s) : inventaire clôturé`,'bad'); flushing=false; return flushQueue(); }
+      toast('Erreur: '+error.message,'bad');
     } else if(/inventaire|foreign/i.test(error.message)) { toast('Erreur: '+error.message,'bad'); }
   }catch(e){}
   flushing=false; netState(); if(S.inv) renderMine();
@@ -1084,8 +1107,8 @@ async function initBureau(keep){
   B.invs=data;
   if(!data.length){ show('bEmpty'); hide('bMain'); $('bInv').innerHTML=''; return; }
   hide('bEmpty');
-  const cur = keep || $('bInv').value || LS.get('bInv');
-  $('bInv').innerHTML = data.map(i=>`<option value="${i.id}">${esc(i.nom)} — ${new Date(i.created_at).toLocaleDateString('fr-FR')}${i.statut==='cloture'?' (clôturé)':''}</option>`).join('');
+  const cur = keep || $('bInv').value || LS.get('bInv') || data.find(i=>i.actif)?.id;
+  $('bInv').innerHTML = data.map(i=>`<option value="${i.id}">${i.actif?'⭐ ':i.statut==='cloture'?'🔒 ':/test/i.test(i.nom)?'🧪 ':''}${esc(i.nom)} — ${new Date(i.created_at).toLocaleDateString('fr-FR')}${i.actif?' (actif)':i.statut==='cloture'?' (clôturé)':''}</option>`).join('');
   if(cur && data.some(i=>i.id==cur)) $('bInv').value=cur;
   loadBureau();
 }
@@ -1094,7 +1117,9 @@ async function loadBureau(){
   const id=+$('bInv').value; if(!id) return; LS.set('bInv',id);
   B.inv = B.invs.find(i=>i.id===id); B.sel.clear();
   show('bMain');
-  $('bStatus').innerHTML = B.inv.statut==='cloture'?'<span class="pill">Clôturé</span>':'<span class="pill ok">En cours</span>';
+  $('bStatus').innerHTML = B.inv.statut==='cloture' ? '<span class="pill">🔒 Clôturé</span>'
+    : B.inv.actif ? '<span class="pill warn">⭐ Inventaire actif</span>'
+    : '<span class="pill ok">En cours</span> <button class="btn sm pri" onclick="makeActive()">⭐ Rendre actif</button>';
   $('btnClose').textContent = B.inv.statut==='cloture'?'Rouvrir':'Clôturer';
   await refreshBureau();
   if(cptSub) sb.removeChannel(cptSub);
@@ -1254,9 +1279,15 @@ async function bDel(id){
   const {error}=await sb.from('comptages').delete().eq('id',id); if(error) return toast(error.message,'bad');
   refreshBureau();
 }
+async function makeActive(){
+  if(!confirm(`Rendre « ${B.inv.nom} » actif ?\n\nLes téléphones compteront désormais dans cet inventaire.`)) return;
+  await sb.from('inventaires').update({actif:false}).eq('actif',true);
+  const {error}=await sb.from('inventaires').update({actif:true}).eq('id',B.inv.id); if(error) return toast(error.message,'bad');
+  toast('Inventaire actif : '+B.inv.nom,'ok'); initBureau(B.inv.id);
+}
 async function toggleClose(){
   const st = B.inv.statut==='cloture'?'en_cours':'cloture';
-  if(st==='cloture' && !confirm('Clôturer cet inventaire ? Les téléphones ne pourront plus y saisir.')) return;
+  if(st==='cloture' && !confirm('Clôturer cet inventaire ?\n\nIl sera verrouillé : plus aucun comptage ne pourra y être ajouté (même depuis un téléphone hors ligne). Vous pourrez le rouvrir si besoin.')) return;
   const {error}=await sb.from('inventaires').update({statut:st}).eq('id',B.inv.id); if(error) return toast(error.message,'bad');
   initBureau(B.inv.id);
 }
@@ -1339,13 +1370,19 @@ async function doImport(){
   const rows=mapped(); if(!rows.length) return toast('Fichier vide','bad');
   $('iGo').disabled=true; $('iGo').textContent='Import en cours…';
   try{
+    const {data:open}=await sb.from('inventaires').select('id,nom').eq('statut','en_cours');
+    const others=(open||[]).filter(i=>!/test/i.test(i.nom));
+    const closeOthers = others.length ? confirm(`Ce nouvel inventaire deviendra l'inventaire ACTIF ⭐.\n\nClôturer (verrouiller) les inventaires encore en cours ?\n• ${others.map(i=>i.nom).join('\n• ')}\n\nOK = clôturer · Annuler = les laisser ouverts`) : false;
     const {data:inv,error}=await sb.from('inventaires').insert({nom,fichier:$('iFile').files[0]?.name||null}).select().single();
     if(error) throw error;
     for(let i=0;i<rows.length;i+=500){
       const {error:e2}=await sb.from('articles').insert(rows.slice(i,i+500).map(r=>({...r,inventaire_id:inv.id})));
       if(e2) throw e2;
     }
-    toast(`${rows.length} articles importés`,'ok'); closePanel('importBox'); initBureau(inv.id);
+    if(closeOthers) await sb.from('inventaires').update({statut:'cloture'}).in('id',others.map(i=>i.id));
+    await sb.from('inventaires').update({actif:false}).eq('actif',true);
+    await sb.from('inventaires').update({actif:true}).eq('id',inv.id);
+    toast(`${rows.length} articles importés — inventaire actif ⭐`,'ok'); closePanel('importBox'); initBureau(inv.id);
   }catch(e){ toast('Erreur : '+e.message,'bad'); }
   $('iGo').disabled=false; $('iGo').textContent="Importer et créer l'inventaire";
 }
