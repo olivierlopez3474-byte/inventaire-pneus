@@ -514,7 +514,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 20:40';
+const APP_V='v17.11 21:00';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 function go(v,push=true){
@@ -941,6 +941,7 @@ function onTestScan(txt, result){
   const now=Date.now();
   if(TESTS[0] && TESTS[0].raw===txt && now-(TESTS[0].seen||TESTS[0].t)<1500){ TESTS[0].seen=now; return; } // toujours dans le champ
   TESTS.unshift({raw:String(txt),format:fmtName,t:now,seen:now}); TESTS=TESTS.slice(0,10);
+  testLookup(TESTS[0]);
   beep(true);
   if(TCAM && tScanning){ TCAM.freeze(txt); TCAM=null; tScanning=false; $('btnScanT').textContent='📷 Scanner à nouveau'; }
   renderTest(); $('testList').scrollIntoView({behavior:'smooth',block:'start'});
@@ -986,19 +987,61 @@ async function stopTestScan(){
   if(TCAM){ TCAM.stop(); TCAM=null; }
   tScanning=false; if($('btnScanT')) $('btnScanT').textContent='📷 Scanner un code-barres';
 }
-function testManual(){ const v=$('tManual').value.trim(); if(!v) return; $('tManual').value=''; TESTS.unshift({raw:v,format:'',t:Date.now()}); TESTS=TESTS.slice(0,10); renderTest(); }
+function testManual(){ const v=$('tManual').value.trim(); if(!v) return; $('tManual').value=''; TESTS.unshift({raw:v,format:'',t:Date.now()}); TESTS=TESTS.slice(0,10); testLookup(TESTS[0]); renderTest(); }
+// Cherche le code dans tous les inventaires en cours (et connaît leur liste pour la création)
+let TINV=[];
+async function testLookup(t){
+  try{
+    const [{data:invs},{data:arts}]=await Promise.all([
+      sb.from('inventaires').select('id,nom,actif').eq('statut','en_cours').order('created_at',{ascending:false}),
+      sb.from('articles').select('designation,inventaire_id,qte_theorique').eq('ean',keyEan(t.raw))
+    ]);
+    TINV=invs||[];
+    t.found=(arts||[]).filter(a=>TINV.some(i=>i.id===a.inventaire_id)).map(a=>({inv:TINV.find(i=>i.id===a.inventaire_id).nom,des:a.designation,stock:a.qte_theorique}));
+  }catch(e){ t.found=null; }
+  renderTest();
+}
+function testCreateForm(idx){
+  const t=TESTS[idx]; t.form=!t.form; renderTest();
+  if(t.form) setTimeout(()=>{ const el=$('tcDes'+idx); el&&el.focus(); },50);
+}
+async function testCreate(idx){
+  const t=TESTS[idx], invId=+$('tcInv'+idx).value, des=$('tcDes'+idx).value.trim(), stock=+$('tcStock'+idx).value||0;
+  if(!des) return toast('Indiquez une désignation','bad');
+  const inv=TINV.find(i=>i.id===invId);
+  if(inv && inv.actif && !confirm(`Créer « ${des} » dans l'inventaire ACTIF « ${inv.nom} » (le vrai) ?`)) return;
+  const {error}=await sb.from('articles').insert({inventaire_id:invId,ean:keyEan(t.raw),designation:des,qte_theorique:stock,extra:{cree_par:ROLE?.who||'',cree_depuis:'test lecteur'}});
+  if(error) return toast(error.message,'bad');
+  toast('Article créé dans « '+(inv?inv.nom:'')+' »','ok'); t.form=false;
+  if(S.inv===invId) loadArts();
+  testLookup(t);
+}
 function renderTest(){
   $('testList').innerHTML = TESTS.length ? TESTS.map((t,i)=>{
-    const ck=eanCheck(t.raw), a=S.byEan.get(keyEan(t.raw));
+    const ck=eanCheck(t.raw);
+    const foundHtml = t.found===undefined ? '<span class="muted">recherche…</span>'
+      : t.found===null ? '<span class="pill">hors ligne</span>'
+      : t.found.length ? t.found.map(f=>`<span class="pill ok">${esc(f.inv)} : ${esc(f.des)} (stock ${fmt(f.stock)})</span>`).join(' ')
+      : '<span class="pill warn">absent de tous les inventaires en cours</span>';
+    const defInv = (TINV.find(x=>/test/i.test(x.nom)&&!x.actif)||TINV.find(x=>!x.actif)||TINV[0]||{}).id;
+    const notIn = TINV.filter(x=>!(t.found||[]).some(f=>f.inv===x.nom));
+    const form = t.form ? `<div style="margin-top:8px;padding:10px;background:#fbf3f2;border-radius:10px">
+        <label class="f">Inventaire</label><select id="tcInv${i}">${notIn.map(x=>`<option value="${x.id}" ${x.id===defInv?'selected':''}>${x.actif?'⭐ ':/test/i.test(x.nom)?'🧪 ':''}${esc(x.nom)}${x.actif?' (actif — le vrai)':''}</option>`).join('')}</select>
+        <label class="f">Désignation</label><input id="tcDes${i}" type="text" placeholder="ex. Boîte de gâteaux">
+        <label class="f">Stock théorique</label><input id="tcStock${i}" type="number" inputmode="numeric" value="0">
+        <button class="btn dark" style="width:100%;margin-top:10px" onclick="testCreate(${i})">➕ Créer l'article</button></div>` : '';
+    const canCreate = t.found && notIn.length;
     return `<div style="padding:10px 0;border-bottom:1px solid var(--line);${i?'opacity:.7':''}">
       <div style="font:700 ${i?18:24}px ui-monospace,Menlo,Consolas,monospace;letter-spacing:1px;word-break:break-all">${esc(t.raw)}</div>
       <div class="small" style="margin-top:4px">
         <span class="pill blue">${esc(t.format||'saisie manuelle')}</span>
         <span class="pill">${t.raw.length} caractère(s)</span>
         ${ck===null?'':ck?'<span class="pill ok">clé de contrôle ✓</span>':'<span class="pill bad">clé de contrôle ✗</span>'}
-        ${a?`<span class="pill ok">trouvé : ${esc(a.designation)}</span>`:'<span class="pill warn">absent de l\'inventaire</span>'}
         <span class="muted">${new Date(t.t).toLocaleTimeString('fr-FR')}</span>
-      </div></div>`; }).join('') : '<div class="muted small">Scannez n\'importe quel code-barres (boîte de gâteaux, livre…) : le texte lu s\'affichera ici.</div>';
+      </div>
+      <div class="small" style="margin-top:6px">${foundHtml}</div>
+      ${canCreate?`<button class="btn sm ${t.form?'':'pri'}" style="margin-top:8px" onclick="testCreateForm(${i})">${t.form?'Annuler':'➕ Créer l\'article dans un inventaire'}</button>`:''}
+      ${form}</div>`; }).join('') : '<div class="muted small">Scannez n\'importe quel code-barres (boîte de gâteaux, livre…) : le texte lu s\'affichera ici.</div>';
 }
 function onScan(txt){
   const now=Date.now(); const k=keyEan(txt);
