@@ -265,7 +265,7 @@ body.noadmin #toast{bottom:24px!important}
 
     <div class="card" style="margin-top:12px">
       <div class="row">
-        <input id="q" type="search" placeholder="EAN, dimension (205/55R16), modèle…" oninput="searchArt()" inputmode="search" enterkeyhint="search">
+        <input id="q" type="search" placeholder="Libellé, dimension, marque, EAN… (mots dans n'importe quel ordre)" oninput="searchArt()" inputmode="search" enterkeyhint="search">
       </div>
       <div id="res" class="list res small"></div>
     </div>
@@ -369,7 +369,7 @@ body.noadmin #toast{bottom:24px!important}
       <button class="btn sm" id="findClose" onclick="go('bureau')">Fermer</button>
     </div>
     <p class="small muted" style="margin-top:0">Cherche dans tous les inventaires : dernier dépôt connu et historique des comptages.</p>
-    <input id="fdQ" type="search" placeholder="EAN, dimension (205/55R16), modèle, référence…" oninput="finderSearch()" enterkeyhint="search">
+    <input id="fdQ" type="search" placeholder="Libellé, dimension, marque, EAN… (n'importe quel ordre)" oninput="finderSearch()" enterkeyhint="search">
     <div id="fdRes" class="list small res" style="margin-top:8px"></div>
     <div id="fdDet" style="margin-top:10px"></div>
   </div>
@@ -511,7 +511,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 20:05';
+const APP_V='v17.11 20:15';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 function go(v,push=true){
@@ -762,7 +762,7 @@ async function loadLogos(){
 }
 async function loadArts(){
   try{
-    S.arts = await fetchAll('articles','id,ean,reference,designation,marque,dimension,qte_theorique,a_recompter',q=>q.eq('inventaire_id',S.inv));
+    S.arts = await fetchAll('articles','id,ean,reference,designation,marque,dimension,qte_theorique,a_recompter,extra',q=>q.eq('inventaire_id',S.inv));
     LS.set('arts_'+S.inv,S.arts);
   }catch(e){ S.arts = LS.get('arts_'+S.inv,[]); }
   S.byEan = new Map(S.arts.map(a=>[a.ean,a]));
@@ -804,16 +804,26 @@ async function delCount(id){
 }
 
 /* recherche manuelle */
+// Recherche « n'importe où » : chaque mot tapé doit se retrouver quelque part
+// (libellé, dimension, marque/fournisseur, référence, EAN, toutes les autres colonnes du fichier), dans n'importe quel ordre.
+function artHay(a){
+  if(a._hay) return a._hay;
+  const ex=(a.extra&&typeof a.extra==='object')?Object.values(a.extra).join(' '):'';
+  const t=norm([a.designation,a.ean,a.reference,a.dimension,a.marque,brandOf(a),ex].join(' '));
+  const s=squash(t);
+  return a._hay={t, s, s2:s.replace(/zr/g,'r')};
+}
+function matchArt(a,q){
+  const H=artHay(a), qs=squash(q);
+  if(qs && (H.s.includes(qs)||H.s2.includes(qs.replace(/zr/g,'r')))) return true;
+  const words=norm(q).split(/[\s,;]+/).filter(Boolean);
+  return words.length>0 && words.every(w=>{ const ws=squash(w); return H.t.includes(w) || (ws && (H.s.includes(ws)||H.s2.includes(ws.replace(/zr/g,'r')))); });
+}
 function searchArt(){
   const q=$('q').value; const box=$('res');
   if(q.trim().length<2){box.innerHTML='';return;}
-  const t=squash(q); const words=norm(q).split(/\s+/).filter(Boolean);
-  const r=S.arts.filter(a=>{
-    const hay=norm([a.designation,a.ean,a.reference,a.dimension,a.marque].join(' '));
-    const hs=squash(hay);
-    return hs.includes(t) || words.every(w=>hay.includes(w)||hs.includes(squash(w)));
-  }).slice(0,40);
-  box.innerHTML = r.length? r.map(a=>`<div class="it" onclick="openArt('${esc(a.ean)}')"><span class="brandsm">${brandHtml(brandOf(a))}</span><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${esc(a.ean)}${a.reference?' · '+esc(a.reference):''}</div></div><span class="pill">stock ${fmt(a.qte_theorique)}</span></div>`).join('') : '<div class="muted" style="padding:8px 0">Aucun résultat</div>';
+  const all=S.arts.filter(a=>matchArt(a,q)), r=all.slice(0,50);
+  box.innerHTML = (all.length>r.length?`<div class="muted small" style="padding:4px 0">${all.length} résultats — affinez la recherche</div>`:'') + (r.length? r.map(a=>`<div class="it" onclick="openArt('${esc(a.ean)}')"><span class="brandsm">${brandHtml(brandOf(a))}</span><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${esc(a.ean)}${a.reference?' · '+esc(a.reference):''}</div></div><span class="pill">stock ${fmt(a.qte_theorique)}</span></div>`).join('') : '<div class="muted" style="padding:8px 0">Aucun résultat</div>');
 }
 
 /* scan : moteur ZXing-C++ (WebAssembly) via l'API BarcodeDetector — bien plus fiable que l'ancien moteur sur les EAN */
@@ -1394,7 +1404,7 @@ async function showFinder(){
   if(!CAT){
     $('fdRes').innerHTML='<div class="muted">Chargement…</div>';
     try{
-      const [arts]=await Promise.all([fetchAll('articles','ean,designation,reference,dimension,marque,inventaire_id',q=>q),loadMem()]);
+      const [arts]=await Promise.all([fetchAll('articles','ean,designation,reference,dimension,marque,extra,inventaire_id',q=>q),loadMem()]);
       const m=new Map(); arts.forEach(a=>{ const o=m.get(a.ean); if(!o||a.inventaire_id>o.inventaire_id) m.set(a.ean,a); });
       CAT=[...m.values()];
     }catch(e){ return toast(e.message,'bad'); }
@@ -1405,15 +1415,11 @@ async function showFinder(){
 function finderSearch(){
   const q=$('fdQ').value; if(!CAT) return;
   if(q.trim().length<2){ $('fdRes').innerHTML=''; return; }
-  const t=squash(q), k=keyEan(q), words=norm(q).split(/\s+/).filter(Boolean);
-  const r=CAT.filter(a=>{
-    if(a.ean===k) return true;
-    const hay=norm([a.designation,a.ean,a.reference,a.dimension,a.marque].join(' ')), hs=squash(hay);
-    return hs.includes(t) || words.every(w=>hay.includes(w)||hs.includes(squash(w)));
-  }).slice(0,30);
-  $('fdRes').innerHTML = r.length ? r.map(a=>{ const kn=MEM.get(a.ean)||[];
+  const k=keyEan(q);
+  const all=CAT.filter(a=>a.ean===k || matchArt(a,q)), r=all.slice(0,50);
+  $('fdRes').innerHTML = `<div class="muted small" style="padding:4px 0">${all.length} article(s) trouvé(s)${all.length>r.length?' — 50 premiers affichés, affinez':''}</div>` + (r.length ? r.map(a=>{ const kn=MEM.get(a.ean)||[];
     return `<div class="it" onclick="finderDetail('${esc(a.ean)}')"><span class="brandsm">${brandHtml(brandOf(a))}</span><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${esc(a.ean)}</div></div>${kn.length?`<span class="pill warn">📍 ${esc(kn[0].depot)}</span>`:'<span class="pill">jamais compté</span>'}</div>`; }).join('')
-    : '<div class="muted" style="padding:8px 0">Aucun article trouvé</div>';
+    : '<div class="muted" style="padding:8px 0">Aucun article trouvé</div>');
   if(r.length===1) finderDetail(r[0].ean);
 }
 async function finderDetail(ean){
