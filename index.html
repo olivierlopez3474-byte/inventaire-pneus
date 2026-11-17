@@ -14,6 +14,9 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
+td.c-des,th.c-des{min-width:260px}
+.dt{white-space:nowrap;line-height:1.2}.dt b{display:block}.dt span{font-size:12px;color:#888}
+th.c-last{white-space:normal;max-width:80px}
 .dupl{white-space:nowrap;font-size:14px;line-height:1.5}
 /* pas de zoom au double-tap (boutons + / −) */
 html,body,button,.btn,a,input,select,label,.it{touch-action:manipulation}
@@ -578,7 +581,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v18.11 02:30';
+const APP_V='v18.11 02:35';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -1640,7 +1643,8 @@ function cols(){
   const sel={k:'_sel',l:'',f:r=>r.art?`<input type="checkbox" ${B.sel.has(r.ean)?'checked':''} onchange="tSel('${esc(r.ean)}',this.checked)">`:''};
   const base=[{k:'ean',l:'EAN'},{k:'des',l:'Désignation'},{k:'ref',l:'Réf.'}];
   const n=(k,l,f)=>({k,l,n:1,f});
-  const dcol={k:'last',l:'Dernière saisie',f:r=>r.last?`<span style="white-space:nowrap">${dtf(r.last)}</span>`:'<span class="muted">—</span>'};
+  const dcol={k:'last',l:'Dernière saisie',f:r=>{ if(!r.last) return '<span class="muted">—</span>'; const d=new Date(r.last);
+    return `<div class="dt"><b>${d.toLocaleTimeString('fr-FR')}</b><span>${d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'2-digit'})}</span></div>`; }};
   const ec=n('ecart','Écart',r=>`<span class="${r.ecart<0?'neg':r.ecart>0?'pos':''}">${r.ecart>0?'+':''}${fmt(r.ecart)}</span>`);
   switch(B.tab){
     case 'ecarts': return [sel,...base,dcol,n('theo','Stock'),n('compte1','Compté'),n('recompte','Recompté'),ec,n('valEcart','Écart €',r=>eur(r.valEcart)),{k:'zones',l:'Compté dans',f:r=>esc(r.lieux.join(', '))},{k:'lastDep',l:'Dernier dépôt connu',f:r=>esc(r.knownTxt)||'<span class="muted">—</span>'},{k:'rec',l:'',f:r=>r.rec?'<span class="pill warn">à recompter</span>':''}];
@@ -1682,8 +1686,8 @@ function curRows(){
 function renderAna(){
   const C=cols(), rows=curRows();
   const lim=rows.slice(0,1500);
-  $('anaTable').innerHTML = `<table><thead><tr>${C.map(c=>`<th class="${c.n?'n':''}" onclick="sortBy('${c.k}')">${c.l}${B.sort&&B.sort.k===c.k?(B.sort.d>0?' ▲':' ▼'):''}</th>`).join('')}</tr></thead><tbody>${
-    lim.map(r=>`<tr ${r.hors?'class="trhors"':''}>${C.map(c=>`<td class="${c.n?'n':''}">${c.f?c.f(r):(c.n?fmt(r[c.k]):esc(r[c.k]))}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${C.length}" class="muted">Rien à signaler 👍</td></tr>`
+  $('anaTable').innerHTML = `<table><thead><tr>${C.map(c=>`<th class="${c.n?'n':''} c-${c.k}" onclick="sortBy('${c.k}')">${c.l}${B.sort&&B.sort.k===c.k?(B.sort.d>0?' ▲':' ▼'):''}</th>`).join('')}</tr></thead><tbody>${
+    lim.map(r=>`<tr ${r.hors?'class="trhors"':''}>${C.map(c=>`<td class="${c.n?'n':''} c-${c.k}">${c.f?c.f(r):(c.n?fmt(r[c.k]):esc(r[c.k]))}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${C.length}" class="muted">Rien à signaler 👍</td></tr>`
   }</tbody></table>${rows.length>1500?'<p class="small muted">Affichage limité à 1500 lignes (l\'export contient tout).</p>':''}`;
   renderActions();
 }
