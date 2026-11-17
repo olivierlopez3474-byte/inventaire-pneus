@@ -201,7 +201,7 @@ body.noadmin #toast{bottom:24px!important}
   <span id="netState" class="small"></span>
   <button id="btnInstall" class="btn sm pri hidden" onclick="installApp()">Installer</button>
   <div style="text-align:right;line-height:1.15">
-    <div id="hdrOp" style="font-weight:800;font-size:15px;color:var(--acc)"></div>
+    <div id="hdrOp" style="font-weight:800;font-size:15px;color:var(--acc);cursor:pointer" onclick="opHeaderClick()" title="Changer d'opérateur"></div>
     <div id="appV" style="color:#777;font-size:10px"></div>
   </div>
 </header>
@@ -251,29 +251,21 @@ body.noadmin #toast{bottom:24px!important}
         <label class="loc"><span>📍 Dépôt</span><select id="cZone" onchange="switchDepot(this.value)"></select></label>
         <label class="loc hidden" id="cRackBox"><span>🗄 Rack</span><select id="cRack" onchange="switchRack(this.value)"></select></label>
       </div>
-      <span class="pill hidden" id="cFast">⚡ rapide</span>
-      <span class="pill warn hidden" id="cRec">🔁 recomptage</span>
       <span class="pill bad hidden" id="cPend"></span>
       <span style="flex:1"></span>
-      <button class="btn sm" id="btnOpt" onclick="toggleOpt()">⋯</button>
+      <button class="btn sm" onclick="toggleExpected()">📋 Attendus dans ce dépôt</button>
     </div>
-    <div id="optBox" class="card hidden" style="padding:12px 14px">
-      <div class="small muted">Inventaire : <b id="cInv"></b></div>
-      <label class="switch" style="margin-top:10px"><input type="checkbox" id="fast" onchange="modeBadges()"> Mode rapide (1 scan = 1 pneu)</label>
-      <label class="switch" style="margin-top:8px"><input type="checkbox" id="recMode" onchange="modeBadges();renderRecList();if(S.cur)renderDup(S.cur)"> Mode recomptage</label>
-      <div class="row" style="margin-top:12px">
-        <button class="btn sm" onclick="changeSetup()">Changer d'opérateur / inventaire</button>
-        <button class="btn sm" id="optSim" onclick="simScan()">🧪 Simuler un scan</button>
-      </div>
-      <button class="btn sm dark" style="width:100%;margin-top:8px" onclick="showExpected()">📋 Articles attendus dans ce dépôt</button>
-      <div id="expBox" class="hidden" style="margin-top:10px">
-        <div class="small muted" id="expHead"></div>
-        <div class="list small res" id="expList"></div>
-      </div>
+    <div id="expBox" class="card hidden" style="padding:12px 14px">
+      <div class="small muted" id="expHead"></div>
+      <div class="list small res" id="expList"></div>
     </div>
+    <!-- options mises de côté (mode rapide, recomptage manuel) : conservées masquées pour plus tard -->
+    <div class="hidden"><b id="cInv"></b><span id="cFast"></span><span id="cRec"></span>
+      <input type="checkbox" id="fast"><input type="checkbox" id="recMode"><button id="optSim"></button></div>
 
-    <div id="recBox" class="card hidden">
-      <b>À recompter</b> <span class="muted small" id="recN"></span>
+    <div id="recBox" class="card hidden" style="border:2px solid var(--warn)">
+      <b>🔁 À recompter</b> <span class="muted small" id="recN"></span>
+      <div class="small muted">Ces articles sont à recompter : la prochaine saisie de chacun compte comme recomptage.</div>
       <div class="list small" id="recList"></div>
     </div>
 
@@ -350,6 +342,7 @@ body.noadmin #toast{bottom:24px!important}
   <div id="readerT" style="border-radius:var(--r);overflow:hidden;background:#000"></div>
   <button id="btnScanT" class="btn dark scanbtn" onclick="toggleTestScan()">📷 Scanner un code-barres</button>
   <div class="small muted" style="margin-top:6px;text-align:center">Image floue ? Reculez à 20–30 cm, ou touchez l'image pour forcer la lecture.</div>
+  <button class="btn" style="width:100%;margin-top:10px" onclick="testSimulate()">🧪 Simuler un scan (article au hasard de l'inventaire)</button>
   <div class="row" style="margin-top:10px"><input id="tManual" type="text" inputmode="numeric" placeholder="ou tapez un code pour le vérifier" enterkeyhint="done"><button class="btn" style="flex:0" onclick="testManual()">OK</button></div>
   <div class="card" style="margin-top:12px">
     <div id="testList"></div>
@@ -541,7 +534,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 22:00';
+const APP_V='v17.11 22:15';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -633,6 +626,7 @@ async function initSaisie(){
   else if(st.active && st.inv && !data.some(i=>i.id==st.inv)) toast('L\'inventaire précédent est clôturé : vérifiez l\'inventaire choisi','bad');
   netState(); flushQueue();
 }
+function opHeaderClick(){ if(!ROLE) return; if(confirm('Changer d\'opérateur ?')){ go('saisie'); changeSetup(); } }
 function setOpHeader(who){ $('hdrOp').textContent = who ? '👤 '+who : ''; }
 function changeSetup(){ stopScan(); setRole(null); S.inv=null; setOpHeader('');  setTimeout(updateInvStrip,0); const st=LS.get('setup',{}); st.active=false; LS.set('setup',st); hide('counting'); show('setup'); }
 
@@ -759,7 +753,7 @@ async function loadAllCounts(){
   }).subscribe();
 }
 function dupInfo(ean){
-  const rec=$('recMode').checked;
+  const rec=isRec(ean);
   const sent=S.allC.filter(c=>c.ean===ean && !!c.recomptage===rec);
   const pend=Q.filter(c=>c.inventaire_id===S.inv && c.ean===ean && !!c.recomptage===rec);
   const all=sent.concat(pend);
@@ -826,10 +820,10 @@ function subscribeArts(){
     const a=S.byEan.get(p.new.ean); if(a){a.a_recompter=p.new.a_recompter; renderRecList();}
   }).subscribe();
 }
+function isRec(ean){ return $('recMode').checked || !!(S.byEan.get(ean)||{}).a_recompter; }
 function renderRecList(){
   const rec=S.arts.filter(a=>a.a_recompter);
-  const on=$('recMode').checked;
-  $('recBox').classList.toggle('hidden',!on);
+  $('recBox').classList.toggle('hidden',!rec.length);
   $('recN').textContent = rec.length? `(${rec.length})`:'— rien à recompter';
   $('recList').innerHTML = rec.map(a=>`<div class="it" onclick="openArt('${esc(a.ean)}')"><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${esc(a.ean)}</div></div><span class="pill warn">recompter</span></div>`).join('');
 }
@@ -1059,6 +1053,17 @@ async function testLookup(t){
   }catch(e){ t.found=null; }
   renderTest();
 }
+async function testSimulate(){
+  let pool=S.arts&&S.arts.length?S.arts:null;
+  if(!pool){
+    const invId=S.inv || (await sb.from('inventaires').select('id').eq('actif',true).limit(1)).data?.[0]?.id;
+    if(!invId) return toast('Aucun inventaire pour simuler','bad');
+    const {data}=await sb.from('articles').select('ean').eq('inventaire_id',invId).limit(500); pool=data||[];
+  }
+  pool=pool.filter(a=>/^\d{8,14}$/.test(a.ean)); if(!pool.length) return toast('Aucun EAN dans cet inventaire','bad');
+  const a=pool[Math.floor(Math.random()*pool.length)];
+  if(TESTS[0]) TESTS[0].seen=0; onTestScan(a.ean,{format:{formatName:'simulation'}});
+}
 function tDraft(i,k,v){ if(TESTS[i]) TESTS[i][k]=v; }
 function testCreateForm(idx){
   const t=TESTS[idx]; t.form=!t.form; renderTest();
@@ -1170,6 +1175,7 @@ $('q').addEventListener('keydown',e=>{
   const v=$('q').value.replace(/\s/g,'');
   if(/^\d{6,14}$/.test(v)){ e.preventDefault(); $('q').value=''; $('res').innerHTML=''; S.lastCode=''; onScan(v); }
 });
+function toggleExpected(){ if($('expBox').classList.contains('hidden')) showExpected(); else hide('expBox'); }
 async function showExpected(){
   await loadMem();
   const z=S.zone;
@@ -1181,7 +1187,6 @@ async function showExpected(){
   $('expList').innerHTML = todo.map(a=>{ const m=known(a.ean,S.inv).find(m=>m.depot===z); return `<div class="it" onclick="openArt('${esc(a.ean)}')"><span class="brandsm">${brandHtml(brandOf(a))}</span><div class="t"><div><b>${esc(a.designation)}</b></div><div class="muted">${esc(a.ean)} · ${m.racks?'<b>rack '+esc(m.racks)+'</b> · ':''}dernière fois ${fmt(m.qte)} le ${dshort(m.vu)}</div></div></div>`; }).join('');
   show('expBox');
 }
-function toggleOpt(){ $('optBox').classList.toggle('hidden'); }
 function modeBadges(){ $('cFast').classList.toggle('hidden',!$('fast').checked); $('cRec').classList.toggle('hidden',!$('recMode').checked); }
 function simScan(){
   if(!S.arts.length) return toast('Aucun article dans cet inventaire','bad');
@@ -1206,7 +1211,7 @@ function saveCount(){
   hide('artCard'); S.cur=null; resumeScan();
 }
 function addCount(ean,qte){
-  const rec = $('recMode').checked;
+  const rec = isRec(ean);
   Q.push({inventaire_id:S.inv,ean,qte,zone:S.zone,rack:S.rack||null,compteur:S.who,recomptage:rec,created_at:new Date().toISOString()});
   LS.set('queue',Q); renderMine(); netState(); flushQueue();
 }
