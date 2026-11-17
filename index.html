@@ -67,6 +67,10 @@ label.f{display:block;font-size:12px;color:var(--mute);margin:10px 0 4px;text-tr
 @keyframes scanline{from{top:8%}to{top:92%}}
 .camtorch{position:absolute;top:10px;right:10px;width:46px;height:46px;border-radius:50%;border:0;background:rgba(0,0,0,.55);font-size:22px}
 .camtorch.on{background:var(--acc)}
+.frozen img{width:100%;max-height:170px;object-fit:cover;display:block;filter:brightness(.75)}
+.camok{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;color:#fff;font-weight:800;font-size:20px;text-shadow:0 1px 4px #000}
+.frozen{min-height:60px;background:var(--ok)}
+.bigcode{font:800 24px/1.2 ui-monospace,Menlo,Consolas,monospace;letter-spacing:1px;margin-bottom:4px;word-break:break-all}
 .camtap{position:absolute;left:0;right:0;bottom:8px;text-align:center;color:#fff;font-size:12px;text-shadow:0 1px 3px #000;pointer-events:none}
 .camdbg{margin-top:8px;padding:8px;border:1px dashed var(--line);border-radius:10px;background:#fff;font:11px/1.4 ui-monospace,Menlo,monospace;color:#444}
 .camdbg canvas{max-width:100%;display:block;margin-bottom:6px;border:1px solid #ddd}
@@ -267,6 +271,7 @@ body.noadmin #toast{bottom:24px!important}
       <div class="row" style="align-items:flex-start">
         <div style="flex:1">
           <div id="aLogo" class="brandbig"></div>
+          <div id="aCode" class="bigcode"></div>
           <h3 id="aName"></h3>
           <div class="small muted" id="aMeta"></div>
           <div class="small" id="aInfo" style="margin-top:6px"></div>
@@ -503,7 +508,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 19:30';
+const APP_V='v17.11 19:40';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 function go(v,push=true){
@@ -867,6 +872,12 @@ class Cam{
     else { beep(false); toast('Pas de code-barres lu sur cette image','bad'); }
   }
   pause(){ this.paused=true; } resume(){ this.paused=false; }
+  freeze(code){
+    const v=this.video; let url='';
+    try{ const c=document.createElement('canvas'); const r=Math.min(1,900/v.videoWidth); c.width=Math.round(v.videoWidth*r); c.height=Math.round(v.videoHeight*r); c.getContext('2d').drawImage(v,0,0,c.width,c.height); url=c.toDataURL('image/jpeg',0.7); }catch(e){}
+    this.on=false; try{ this.stream&&this.stream.getTracks().forEach(t=>t.stop()); }catch(e){}
+    this.box.innerHTML=`<div class="camwrap frozen">${url?`<img src="${url}" alt="">`:''}<div class="camok">✓ Code lu${code?' : '+esc(code):''}</div></div>`;
+  }
   stop(){ this.on=false; try{ this.stream&&this.stream.getTracks().forEach(t=>t.stop()); }catch(e){} this.box.innerHTML=''; }
 }
 async function toggleScan(){ S.scanning ? stopScan() : startScan(); }
@@ -893,7 +904,9 @@ function onTestScan(txt, result){
   const now=Date.now();
   if(TESTS[0] && TESTS[0].raw===txt && now-(TESTS[0].seen||TESTS[0].t)<1500){ TESTS[0].seen=now; return; } // toujours dans le champ
   TESTS.unshift({raw:String(txt),format:fmtName,t:now,seen:now}); TESTS=TESTS.slice(0,10);
-  beep(true); renderTest();
+  beep(true);
+  if(TCAM && tScanning){ TCAM.freeze(txt); TCAM=null; tScanning=false; $('btnScanT').textContent='📷 Scanner à nouveau'; }
+  renderTest(); $('testList').scrollIntoView({behavior:'smooth',block:'start'});
 }
 // Essaie la détection sur une image à plusieurs tailles (0 = taille d'origine)
 async function detectScaled(det,src,sizes){
@@ -970,7 +983,7 @@ function onScan(txt){
     }
   } else {
     beep(!a?false:d.others.length?'warn':true);
-    if(S.cam && S.scanning) S.cam.pause();
+    if(S.cam && S.scanning){ S.cam.freeze(k); S.cam=null; S.scanning=false; $('btnScan').textContent='📷 Scanner le pneu suivant'; }
     openArt(k);
   }
 }
@@ -978,6 +991,7 @@ function openArt(ean){
   const a=S.byEan.get(ean); S.cur=ean;
   $('artCard').classList.toggle('unk',!a);
   $('aLogo').innerHTML = brandHtml(brandOf(a));
+  $('aCode').textContent = ean;
   $('aName').textContent = a? a.designation : 'Code non référencé dans le fichier';
   $('aMeta').textContent = 'EAN '+ean + (a&&a.reference?' · réf. '+a.reference:'');
   $('newArt').classList.toggle('hidden',!!a); if(!a){$('naDes').value='';$('naStock').value=0;$('naPrix').value='';}
@@ -1019,7 +1033,11 @@ function simScan(){
   const a=S.arts[Math.floor(Math.random()*S.arts.length)]; S.lastCode=''; onScan(a.ean);
 }
 function closeArt(){ hide('artCard'); S.cur=null; resumeScan(); }
-function resumeScan(){ S.lastT=Date.now(); if(S.cam && S.scanning) S.cam.resume(); }
+function resumeScan(){
+  S.lastT=Date.now();
+  if(S.cam && S.scanning) S.cam.resume();
+  else { $('reader').innerHTML=''; $('btnScan').scrollIntoView({behavior:'smooth',block:'center'}); }
+}
 function bump(d){ const i=$('aQty'); i.value=Math.max(0,(+i.value||0)+d); }
 $('aQty').addEventListener('keydown',e=>{if(e.key==='Enter')saveCount()});
 function saveCount(){
