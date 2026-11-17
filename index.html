@@ -263,11 +263,6 @@ body.noadmin #toast{bottom:24px!important}
     <div class="hidden"><b id="cInv"></b><span id="cFast"></span><span id="cRec"></span>
       <input type="checkbox" id="fast"><input type="checkbox" id="recMode"><button id="optSim"></button></div>
 
-    <div id="recBox" class="card hidden" style="border:3px solid var(--warn);background:#fffaf0">
-      <div class="row"><b style="font-size:17px">🔁 MODE RECOMPTAGE</b><span class="small" id="recN" style="text-align:right"></span></div>
-      <div class="small muted" style="margin:4px 0 8px">Lancé par l'admin. Articles en écart (compté ≠ stock), classés par rack puis par libellé. Chaque saisie remplace le premier comptage (qui reste conservé).</div>
-      <div class="list small res" id="recList" style="max-height:340px"></div>
-    </div>
 
     <div id="reader"></div>
     <button id="btnScan" class="btn dark scanbtn" onclick="toggleScan()">📷 Scanner un code-barres</button>
@@ -324,9 +319,13 @@ body.noadmin #toast{bottom:24px!important}
       <button class="btn pri" style="width:100%;padding:16px;font-size:17px" onclick="saveCount()">✔ Enregistrer</button>
     </div>
 
-    <div class="card">
-      <div class="row"><b>Mes dernières saisies</b><span class="muted small" style="text-align:right" id="myTotal"></span></div>
+    <div class="card" id="bottomCard">
+      <div class="row"><b id="listTitle">Articles comptés</b><span class="muted small" style="text-align:right" id="myTotal"></span></div>
       <div id="mine" class="list small"></div>
+      <div id="recBox" class="hidden">
+        <div class="small" style="margin:4px 0 8px;padding:8px 10px;background:#fff4cc;border-radius:8px">🔁 <b>Recomptage lancé par l'admin</b> — articles en écart (compté ≠ stock), classés par rack puis par libellé. Chaque saisie remplace le premier comptage (qui reste conservé). <span id="recN"></span></div>
+        <div class="list small" id="recList"></div>
+      </div>
     </div>
   </div>
 </section>
@@ -534,7 +533,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 22:45';
+const APP_V='v17.11 23:00';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -751,7 +750,7 @@ async function loadAllCounts(){
     else if(p.eventType==='DELETE'){ S.allC=S.allC.filter(c=>c.id!==p.old.id); }
     else if(p.eventType==='UPDATE'){ S.allC=S.allC.map(c=>c.id===p.new.id?p.new:c); }
     if(S.cur) renderDup(S.cur);
-    if($('recMode').checked) renderRecList();
+    renderMine();
   }).subscribe();
 }
 function dupInfo(ean){
@@ -865,9 +864,11 @@ function recItems(){
     String(x.a.designation).localeCompare(String(y.a.designation),'fr'));
 }
 function renderRecList(){
-  const on=$('recMode').checked; $('recBox').classList.toggle('hidden',!on); if(!on) return;
+  const on=$('recMode').checked;
+  if(!on){ hide('recBox'); show('mine'); return renderMine(); }
+  hide('mine'); show('recBox'); $('listTitle').textContent='🔁 Recomptage — articles en écart';
   const it=recItems(), left=it.filter(x=>!x.done).length;
-  $('recN').innerHTML = `<b>${left}</b> à recompter · ${it.length-left} fait(s)`;
+  $('recN').innerHTML = ''; $('myTotal').innerHTML = `<b>${left}</b> à recompter · ${it.length-left} fait(s)`;
   let lastHead='';
   $('recList').innerHTML = it.length ? it.map(x=>{
     const head = x.done ? '✓ Déjà recomptés' : x.depot ? lieu(x.depot,x.rack) : 'Emplacement inconnu';
@@ -883,23 +884,36 @@ async function loadMine(){
   S.mine = data||[]; renderMine();
 }
 function artLabel(ean){ const a=S.byEan.get(ean); return a? a.designation : '⚠ Code inconnu'; }
+// Comptage normal : toutes les saisies de l'inventaire (tous opérateurs), la plus récente en haut, heure à la seconde
+let MINE_LIMIT=100;
+const hms=t=>{ const d=new Date(t), today=new Date().toDateString()===d.toDateString();
+  return (today?'':d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'})+' ')+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); };
 function renderMine(){
-  const pend = Q.filter(x=>x.inventaire_id===S.inv && x.compteur===S.who).map(x=>({...x,_p:1}));
-  const all = pend.concat(S.mine);
-  $('mine').innerHTML = all.length ? all.map(c=>`<div class="it">
+  if($('recMode').checked){ renderRecList(); return; }
+  $('listTitle').textContent='Articles comptés — du plus récent au plus ancien';
+  show('mine'); hide('recBox');
+  const pend = Q.filter(x=>x.inventaire_id===S.inv).map(x=>({...x,_p:1}));
+  const all = pend.concat(S.allC.filter(c=>!c.recomptage)).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  const shown = all.slice(0,MINE_LIMIT);
+  $('mine').innerHTML = all.length ? shown.map(c=>{
+     const mineOk = isAdmin() || c.compteur===S.who;
+     return `<div class="it">
      <div class="q">${fmt(c.qte)}</div>
-     <div class="t"><div>${esc(artLabel(c.ean))}</div><div class="muted">${esc(c.ean)} · ${esc(lieu(c.zone,c.rack))} · ${new Date(c.created_at).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}${c.recomptage?' · <b>recompt.</b>':''}${c._p?' · <span class="neg">en attente</span>':''}</div></div>
-     ${c._p?'':`<button class="btn sm" onclick="editCount(${c.id})" title="Corriger la quantité">✏️</button><button class="btn sm red" onclick="delCount(${c.id})" title="Supprimer">✕</button>`}</div>`).join('') : '<div class="muted">Aucune saisie pour l\'instant.</div>';
-  $('myTotal').textContent = all.length? fmt(all.reduce((s,c)=>s+Number(c.qte),0))+' pneus (30 dernières)':'';
+     <div class="t"><div>${esc(artLabel(c.ean))}</div><div class="muted"><b>${hms(c.created_at)}</b> · ${esc(c.compteur||'?')} · ${esc(lieu(c.zone,c.rack))}${c._p?' · <span class="neg">en attente</span>':''}</div></div>
+     ${c._p||!mineOk?'':`<button class="btn sm" onclick="editCount(${c.id})" title="Corriger la quantité">✏️</button><button class="btn sm red" onclick="delCount(${c.id})" title="Supprimer">✕</button>`}</div>`; }).join('')
+     + (all.length>shown.length?`<button class="btn sm" style="width:100%;margin-top:8px" onclick="MINE_LIMIT+=100;renderMine()">Afficher plus (${all.length-shown.length} restantes)</button>`:'')
+     : '<div class="muted">Aucune saisie pour l\'instant.</div>';
+  const nArt=new Set(all.map(c=>c.ean)).size;
+  $('myTotal').textContent = all.length? `${fmt(all.length)} saisie(s) · ${fmt(nArt)} article(s) · ${fmt(all.reduce((s,c)=>s+Number(c.qte),0))} pneus`:'';
 }
 async function editCount(id){
-  const c=S.mine.find(x=>x.id===id); if(!c) return;
+  const c=S.allC.find(x=>x.id===id)||S.mine.find(x=>x.id===id); if(!c) return;
   const v=prompt(`Corriger la quantité\n${artLabel(c.ean)}\n(${lieu(c.zone,c.rack)})`, String(Number(c.qte)));
   if(v===null) return; const q=Number(String(v).replace(',','.'));
   if(isNaN(q)||q<0) return toast('Quantité invalide','bad');
   const {error}=await sb.from('comptages').update({qte:q}).eq('id',id);
   if(error) return toast(/CLOTURE/.test(error.message)?'Inventaire clôturé : modification refusée':error.message,'bad');
-  c.qte=q; const g=S.allC.find(x=>x.id===id); if(g) g.qte=q;
+  c.qte=q; const g=S.allC.find(x=>x.id===id); if(g) g.qte=q; const m=S.mine.find(x=>x.id===id); if(m) m.qte=q;
   renderMine(); if(S.cur===c.ean) renderDup(c.ean); toast('Quantité corrigée : '+fmt(q),'ok');
 }
 async function delCount(id){
@@ -1265,7 +1279,6 @@ function addCount(ean,qte){
   const rec = isRec(ean);
   Q.push({inventaire_id:S.inv,ean,qte,zone:S.zone,rack:S.rack||null,compteur:S.who,recomptage:rec,created_at:new Date().toISOString()});
   LS.set('queue',Q); renderMine(); netState(); flushQueue();
-  if($('recMode').checked) renderRecList();
 }
 let flushing=false;
 async function flushQueue(){
