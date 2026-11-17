@@ -129,7 +129,10 @@ body.noadmin #toast{bottom:24px!important}
 #invStrip.none{background:#8a8d94}
 .gear{background:none;border:0;color:#fff;font-size:22px;line-height:1;padding:4px 6px;cursor:pointer;opacity:.8}
 .opbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
-.opbar select.pill{width:auto;border:0;padding:5px 8px;font-size:13px;font-weight:600}
+.locrow{display:flex;gap:8px;flex-basis:100%}
+.loc{flex:1;display:flex;flex-direction:column;background:#fff4cc;border:2px solid var(--acc);border-radius:12px;padding:6px 10px;min-width:0}
+.loc span{font-size:11px;font-weight:700;color:#7a5b00;text-transform:uppercase;letter-spacing:.4px}
+.loc select{border:0;background:transparent;font-size:20px;font-weight:800;padding:2px 0;width:100%;color:var(--ink)}
 .opbar .pill{font-size:13px;padding:5px 9px}
 .opbar .invpill{flex-basis:100%;text-align:center;background:var(--ink);color:#fff;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .opbar .invpill.test{background:#7b3fe4}
@@ -192,7 +195,10 @@ body.noadmin #toast{bottom:24px!important}
   <div class="sp"></div>
   <span id="netState" class="small"></span>
   <button id="btnInstall" class="btn sm pri hidden" onclick="installApp()">Installer</button>
-  <span id="appV" class="small" style="color:#777"></span>
+  <div style="text-align:right;line-height:1.15">
+    <div id="hdrOp" style="font-weight:800;font-size:15px;color:var(--acc)"></div>
+    <div id="appV" style="color:#777;font-size:10px"></div>
+  </div>
 </header>
 <div id="invStrip" class="hidden" onclick="invStripClick()"></div>
 </div>
@@ -236,9 +242,10 @@ body.noadmin #toast{bottom:24px!important}
   <div id="counting" class="hidden">
     <div class="opbar">
       <span class="pill invpill" id="cInvPill" onclick="changeSetup()" title="Changer d'inventaire"></span>
-      <span class="pill blue" id="cWho"></span>
-      <select id="cZone" class="pill warn" onchange="switchDepot(this.value)"></select>
-      <select id="cRack" class="pill hidden" onchange="switchRack(this.value)"></select>
+      <div class="locrow">
+        <label class="loc"><span>📍 Dépôt</span><select id="cZone" onchange="switchDepot(this.value)"></select></label>
+        <label class="loc hidden" id="cRackBox"><span>🗄 Rack</span><select id="cRack" onchange="switchRack(this.value)"></select></label>
+      </div>
       <span class="pill hidden" id="cFast">⚡ rapide</span>
       <span class="pill warn hidden" id="cRec">🔁 recomptage</span>
       <span class="pill bad hidden" id="cPend"></span>
@@ -529,7 +536,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 21:35';
+const APP_V='v17.11 21:45';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -621,14 +628,15 @@ async function initSaisie(){
   else if(st.active && st.inv && !data.some(i=>i.id==st.inv)) toast('L\'inventaire précédent est clôturé : vérifiez l\'inventaire choisi','bad');
   netState(); flushQueue();
 }
-function changeSetup(){ stopScan(); setRole(null); S.inv=null; setTimeout(updateInvStrip,0); const st=LS.get('setup',{}); st.active=false; LS.set('setup',st); hide('counting'); show('setup'); }
+function setOpHeader(who){ $('hdrOp').textContent = who ? '👤 '+who : ''; }
+function changeSetup(){ stopScan(); setRole(null); S.inv=null; setOpHeader('');  setTimeout(updateInvStrip,0); const st=LS.get('setup',{}); st.active=false; LS.set('setup',st); hide('counting'); show('setup'); }
 
 /* ---- profils : admin (tous les menus) / standard (écran de scan seulement) ---- */
 let ROLE = LS.get('role', null); // {who, role}
 function isAdmin(){ return !!(ROLE && ROLE.role==='admin'); }
 function setRole(op){ ROLE = op ? {who:op.nom, role:op.role||'standard'} : null; LS.set('role',ROLE); updateNav(); }
 function updateNav(){
-  const a=isAdmin();
+  const a=isAdmin(); setOpHeader(ROLE?ROLE.who:'');
   $('bnav').classList.toggle('hidden',!a);
   document.body.classList.toggle('noadmin',!a);
   if($('optSim')) $('optSim').classList.toggle('hidden',!a);
@@ -694,7 +702,7 @@ function fillRacks(){
   const d=REF.deps.find(x=>x.nom===S.zone); const racks=(d&&d.racks)||[];
   if(S.rack && !racks.includes(S.rack)) S.rack='';
   $('cRack').innerHTML='<option value="">Rack —</option>'+racks.map(r=>`<option value="${esc(r)}" ${r===S.rack?'selected':''}>Rack ${esc(r)}</option>`).join('');
-  $('cRack').classList.toggle('hidden',!racks.length);
+  $('cRackBox').classList.toggle('hidden',!racks.length);
 }
 function switchRack(r){
   S.rack=r; const st=LS.get('setup',{}); st.rack=r; LS.set('setup',st);
@@ -721,7 +729,7 @@ async function startCount(silent){
   S.inv=inv; S.who=who; S.zone=zone; S.rack=rack0;
   $('cInv').textContent=((S.invs||[]).find(i=>i.id===inv)||{}).nom||$('sInv').selectedOptions[0].text;
   { const iv=(S.invs||[]).find(i=>i.id===inv)||{nom:$('sInv').selectedOptions[0].text}, nm=iv.nom, test=/test/i.test(nm);
-    $('cInvPill').textContent=(iv.actif?'⭐ ':test?'🧪 ':'📋 ')+nm; $('cInvPill').classList.toggle('test',!iv.actif); } $('cWho').textContent='👤 '+who;
+    $('cInvPill').textContent=(iv.actif?'⭐ ':test?'🧪 ':'📋 ')+nm; $('cInvPill').classList.toggle('test',!iv.actif); } setOpHeader(who);
   $('cZone').innerHTML=REF.deps.filter(d=>d.actif||d.nom===zone).map(d=>`<option ${d.nom===zone?'selected':''}>${esc(d.nom)}</option>`).join('');
   fillRacks();
   hide('setup'); show('counting');
