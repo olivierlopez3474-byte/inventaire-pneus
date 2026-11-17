@@ -514,7 +514,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 20:25';
+const APP_V='v17.11 20:30';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 function go(v,push=true){
@@ -1383,9 +1383,11 @@ async function doImport(){
   const rows=mapped(); if(!rows.length) return toast('Fichier vide','bad');
   $('iGo').disabled=true; $('iGo').textContent='Import en cours…';
   try{
-    const {data:open}=await sb.from('inventaires').select('id,nom').eq('statut','en_cours');
+    const {data:open}=await sb.from('inventaires').select('id,nom,actif').eq('statut','en_cours');
+    const curAct=(open||[]).find(i=>i.actif);
+    const makeAct = confirm(`Rendre « ${nom} » ACTIF ⭐ ?\n\nLes téléphones compteront alors dans ce nouvel inventaire.${curAct?`\n(Actuellement actif : « ${curAct.nom} »)`:''}\n\nOK = oui, le rendre actif · Annuler = non, le garder en attente`);
     const others=(open||[]).filter(i=>!/test/i.test(i.nom));
-    const closeOthers = others.length ? confirm(`Ce nouvel inventaire deviendra l'inventaire ACTIF ⭐.\n\nClôturer (verrouiller) les inventaires encore en cours ?\n• ${others.map(i=>i.nom).join('\n• ')}\n\nOK = clôturer · Annuler = les laisser ouverts`) : false;
+    const closeOthers = (makeAct && others.length) ? confirm(`Clôturer (verrouiller) les anciens inventaires encore en cours ?\n• ${others.map(i=>i.nom).join('\n• ')}\n\nOK = clôturer · Annuler = les laisser ouverts`) : false;
     const {data:inv,error}=await sb.from('inventaires').insert({nom,fichier:$('iFile').files[0]?.name||null}).select().single();
     if(error) throw error;
     for(let i=0;i<rows.length;i+=500){
@@ -1393,9 +1395,11 @@ async function doImport(){
       if(e2) throw e2;
     }
     if(closeOthers) await sb.from('inventaires').update({statut:'cloture'}).in('id',others.map(i=>i.id));
-    await sb.from('inventaires').update({actif:false}).eq('actif',true);
-    await sb.from('inventaires').update({actif:true}).eq('id',inv.id);
-    toast(`${rows.length} articles importés — inventaire actif ⭐`,'ok'); closePanel('importBox'); initBureau(inv.id);
+    if(makeAct){
+      await sb.from('inventaires').update({actif:false}).eq('actif',true);
+      await sb.from('inventaires').update({actif:true}).eq('id',inv.id);
+    }
+    toast(`${rows.length} articles importés${makeAct?' — inventaire actif ⭐':' — en attente (bouton « ⭐ Rendre actif » quand vous êtes prêt)'}`,'ok'); closePanel('importBox'); initBureau(inv.id);
   }catch(e){ toast('Erreur : '+e.message,'bad'); }
   $('iGo').disabled=false; $('iGo').textContent="Importer et créer l'inventaire";
 }
