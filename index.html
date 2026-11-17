@@ -326,15 +326,6 @@ tr.trhors td{background:#fff0e3}
         </div>
         <div class="artbtns">
           <button class="btn" onclick="closeArt()" title="Fermer">✕</button>
-          <button class="btn" id="btnEditArt" onclick="toggleEditArt()" title="Modifier l'article">✏️</button>
-        </div>
-      </div>
-      <div id="editArt" class="hidden" style="margin-top:10px;padding:10px;background:#eef3fd;border-radius:10px">
-        <div class="small"><b>✏️ Modifier l'article</b> (dans l'inventaire en cours)</div>
-        <label class="f">Désignation</label><input id="eaDes" type="text">
-        <div class="row" style="margin-top:10px">
-          <button class="btn" onclick="toggleEditArt()">Annuler</button>
-          <button class="btn dark" onclick="saveEditArt()">💾 Enregistrer</button>
         </div>
       </div>
       <div id="newArt" class="hidden" style="margin-top:10px;padding:10px;background:#fbf3f2;border-radius:10px">
@@ -584,7 +575,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v18.11 01:45';
+const APP_V='v18.11 01:50';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -1368,8 +1359,8 @@ function openArt(ean){
   $('aCode').textContent = ean;
   $('aName').textContent = a? a.designation : 'Code non référencé dans le fichier';
   $('aMeta').innerHTML = [a&&a.reference?'Réf. <b>'+esc(a.reference)+'</b>':'', dimTxt(a), 'EAN '+esc(ean)].filter(Boolean).join(' · ');
-  $('newArt').classList.toggle('hidden',!!a); hide('editArt');
-  $('btnEditArt').classList.toggle('hidden',!a || !isAdmin()); if(!a){$('naDes').value='';$('naStock').value=0;$('naPrix').value='';}
+  $('newArt').classList.toggle('hidden',!!a);
+  if(!a){$('naDes').value='';$('naStock').value=0;$('naPrix').value='';}
   $('aInfo').innerHTML = (a&&a.hors_feuille?'<span class="pill horsp">📦 Hors feuille — à régulariser</span> ':'');
   const dd=renderDup(ean);
   if(SRC==='manuel') $('aInfo').innerHTML += '<span class="pill" style="background:#e3ebfb;color:#2b5fd9">✋ Saisie sans scan — vérifiez bien la dimension et le modèle</span>';
@@ -1377,21 +1368,6 @@ function openArt(ean){
   $('aQty').value=1; updateSaveLabels(); show('artCard'); $('res').innerHTML=''; $('q').value='';
   $('artCard').scrollIntoView({behavior:'smooth',block:'center'});
   setTimeout(()=>{$('aQty').focus();$('aQty').select()},250);
-}
-function toggleEditArt(){
-  const a=S.byEan.get(S.cur); if(!a) return;
-  const box=$('editArt'); const open=box.classList.contains('hidden');
-  box.classList.toggle('hidden',!open);
-  if(open){ $('eaDes').value=a.designation||''; }
-}
-async function saveEditArt(){
-  const a=S.byEan.get(S.cur); if(!a) return;
-  const des=$('eaDes').value.trim(); if(!des) return toast('La désignation ne peut pas être vide','bad');
-  const upd={designation:des};
-  const {error}=await sb.from('articles').update(upd).eq('id',a.id);
-  if(error) return toast(error.message,'bad');
-  Object.assign(a,upd); delete a._hay; LS.set('arts_'+S.inv,S.arts);
-  hide('editArt'); toast('Article modifié','ok'); openArt(a.ean); renderMine();
 }
 function showCatHit(c){
   $('artCard').classList.remove('unk'); $('artCard').classList.add('horsf');
