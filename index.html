@@ -581,7 +581,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v18.11 02:35';
+const APP_V='v18.11 02:40';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -1639,7 +1639,14 @@ function dupDet(r){
     + (r.r.length?`<div class="small" style="font-weight:800;margin-top:6px;color:#7b3fe4">Recomptage (total ${fmt(r.recompte)})</div>${by(r.r)}`:'');
 }
 const dtf=t=>t?new Date(t).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'}).replace(' ',' à '):'';
+// Ordre d'affichage : [case] · Dernière saisie · Désignation · Réf. · … · EAN en fin
 function cols(){
+  const C=cols0(); if(!C.some(c=>c.k==='des') || !C.some(c=>c.k==='ean')) return C;
+  const pick=k=>C.find(c=>c.k===k);
+  const head=['_sel','last','des','ref'].map(pick).filter(Boolean);
+  return [...head, ...C.filter(c=>!head.includes(c) && c.k!=='ean'), pick('ean')];
+}
+function cols0(){
   const sel={k:'_sel',l:'',f:r=>r.art?`<input type="checkbox" ${B.sel.has(r.ean)?'checked':''} onchange="tSel('${esc(r.ean)}',this.checked)">`:''};
   const base=[{k:'ean',l:'EAN'},{k:'des',l:'Désignation'},{k:'ref',l:'Réf.'}];
   const n=(k,l,f)=>({k,l,n:1,f});
