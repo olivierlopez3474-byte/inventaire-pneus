@@ -23,7 +23,7 @@
 html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 button,input,select{font:inherit}
 .hidden{display:none!important}
-header.top{background:var(--ink);color:#fff;padding:10px 16px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:20}
+header.top{background:var(--ink);color:#fff;padding:10px 16px;display:flex;align-items:center;gap:12px}
 header.top .logo{width:28px;height:28px;border-radius:50%;border:5px solid var(--acc);box-shadow:inset 0 0 0 3px var(--ink),inset 0 0 0 6px #555}
 header.top h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.2px}
 header.top .sp{flex:1}
@@ -124,6 +124,9 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 body.noadmin #app main{padding-bottom:20px}
 body.noadmin #toast{bottom:24px!important}
 #toast{bottom:90px!important}
+#invStrip{padding:6px 12px;text-align:center;font-size:13px;font-weight:700;color:#fff;background:#2b2e36;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#invStrip.test{background:#7b3fe4}
+#invStrip.none{background:#8a8d94}
 .gear{background:none;border:0;color:#fff;font-size:22px;line-height:1;padding:4px 6px;cursor:pointer;opacity:.8}
 .opbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
 .opbar select.pill{width:auto;border:0;padding:5px 8px;font-size:13px;font-weight:600}
@@ -182,6 +185,7 @@ body.noadmin #toast{bottom:24px!important}
 
 <!-- APP -->
 <div id="app" class="hidden">
+<div id="topwrap" style="position:sticky;top:0;z-index:20">
 <header class="top">
   <div class="logo"></div><h1>Inventaire</h1>
   <span id="hdrMode" class="small" style="color:#999"></span>
@@ -190,6 +194,8 @@ body.noadmin #toast{bottom:24px!important}
   <button id="btnInstall" class="btn sm pri hidden" onclick="installApp()">Installer</button>
   <span id="appV" class="small" style="color:#777"></span>
 </header>
+<div id="invStrip" class="hidden" onclick="invStripClick()"></div>
+</div>
 <main>
 
 <!-- ===== COMPTAGE (mobile) ===== -->
@@ -514,9 +520,27 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 21:00';
+const APP_V='v17.11 21:10';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
+// Bande « inventaire en cours » visible sur toutes les pages
+let ACT_INV=null;
+async function updateInvStrip(){
+  const el=$('invStrip'); if(!el) return; const v=LS.get('view');
+  let inv=null, label='';
+  if(v==='bureau' && B.inv){ inv=B.inv; label='Admin — '; }
+  else if(S.inv){ inv=(S.invs||[]).find(i=>i.id===S.inv)||(B.invs||[]).find(i=>i.id===S.inv); label=v==='saisie'?'Comptage dans : ':'Inventaire de comptage : '; }
+  if(!inv){
+    if(!ACT_INV){ try{ const {data}=await sb.from('inventaires').select('id,nom,actif,statut').eq('actif',true).limit(1); ACT_INV=(data&&data[0])||{}; }catch(e){ ACT_INV={}; } }
+    if(ACT_INV.id){ inv=ACT_INV; label='Inventaire actif : '; }
+  }
+  el.classList.remove('hidden','test','none');
+  if(!inv){ el.textContent='Aucun inventaire sélectionné'; el.classList.add('none'); return; }
+  const closed=inv.statut==='cloture';
+  el.textContent=label+(inv.actif?'⭐ ':closed?'🔒 ':/test/i.test(inv.nom)?'🧪 ':'📋 ')+inv.nom+(inv.actif?' (actif)':closed?' (clôturé)':'');
+  if(!inv.actif) el.classList.add('test');
+}
+function invStripClick(){ if(LS.get('view')==='bureau') $('bInv').focus(); else if(S.inv) { go('saisie'); changeSetup(); } else go('saisie'); }
 function go(v,push=true){
   if(!VIEWS[v]) v='saisie';
   if(v!=='saisie' && !isAdmin()) v='saisie';
@@ -533,6 +557,7 @@ function go(v,push=true){
   else if(v==='bureau') initBureau();
   else if(v==='find') showFinder();
   else if(v==='test') renderTest();
+  updateInvStrip();
 }
 // Sous-écrans de l'administration : ouverture avec retour arrière possible
 function openPanel(id){
@@ -587,7 +612,7 @@ async function initSaisie(){
   else if(st.active && st.inv && !data.some(i=>i.id==st.inv)) toast('L\'inventaire précédent est clôturé : vérifiez l\'inventaire choisi','bad');
   netState(); flushQueue();
 }
-function changeSetup(){ stopScan(); setRole(null); const st=LS.get('setup',{}); st.active=false; LS.set('setup',st); hide('counting'); show('setup'); }
+function changeSetup(){ stopScan(); setRole(null); S.inv=null; setTimeout(updateInvStrip,0); const st=LS.get('setup',{}); st.active=false; LS.set('setup',st); hide('counting'); show('setup'); }
 
 /* ---- profils : admin (tous les menus) / standard (écran de scan seulement) ---- */
 let ROLE = LS.get('role', null); // {who, role}
@@ -681,6 +706,7 @@ async function startCount(silent){
   }
   setRole(opSel);
   $('sPin').value='';
+  setTimeout(updateInvStrip,0);
   const rack0 = st0.zone===zone ? (st0.rack||'') : '';
   LS.set('setup',{inv,who,zone,rack:rack0,active:true});
   S.inv=inv; S.who=who; S.zone=zone; S.rack=rack0;
@@ -1174,7 +1200,7 @@ async function initBureau(keep){
 let cptSub;
 async function loadBureau(){
   const id=+$('bInv').value; if(!id) return; LS.set('bInv',id);
-  B.inv = B.invs.find(i=>i.id===id); B.sel.clear();
+  B.inv = B.invs.find(i=>i.id===id); B.sel.clear(); updateInvStrip();
   show('bMain');
   $('bStatus').innerHTML = B.inv.statut==='cloture' ? '<span class="pill">🔒 Clôturé</span>'
     : B.inv.actif ? '<span class="pill warn">⭐ Inventaire actif</span>'
@@ -1338,7 +1364,7 @@ async function bDel(id){
   const {error}=await sb.from('comptages').delete().eq('id',id); if(error) return toast(error.message,'bad');
   refreshBureau();
 }
-async function makeActive(){
+async function makeActive(){ ACT_INV=null;
   if(!confirm(`Rendre « ${B.inv.nom} » actif ?\n\nLes téléphones compteront désormais dans cet inventaire.`)) return;
   await sb.from('inventaires').update({actif:false}).eq('actif',true);
   const {error}=await sb.from('inventaires').update({actif:true}).eq('id',B.inv.id); if(error) return toast(error.message,'bad');
