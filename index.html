@@ -65,7 +65,7 @@ label.f{display:block;font-size:12px;color:var(--mute);margin:10px 0 4px;text-tr
 .camguide{position:absolute;left:5%;right:5%;top:20%;bottom:20%;border:3px solid rgba(242,183,5,.95);border-radius:12px;box-shadow:0 0 0 999px rgba(0,0,0,.35);overflow:hidden}
 .camguide i{position:absolute;left:0;right:0;height:2px;background:#ff3b30;box-shadow:0 0 8px #ff3b30;animation:scanline 1.6s ease-in-out infinite alternate}
 @keyframes scanline{from{top:8%}to{top:92%}}
-.camtorch{position:absolute;top:10px;right:10px;width:46px;height:46px;border-radius:50%;border:0;background:rgba(0,0,0,.55);font-size:22px}
+.camtorch{position:absolute;top:10px;right:10px;width:56px;height:56px;border-radius:50%;border:2px solid rgba(255,255,255,.7);background:rgba(0,0,0,.55);font-size:26px}
 .camtorch.on{background:var(--acc)}
 .frozen img{width:100%;max-height:170px;object-fit:cover;display:block;filter:brightness(.75)}
 .camok{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;color:#fff;font-weight:800;font-size:20px;text-shadow:0 1px 4px #000}
@@ -266,11 +266,8 @@ body.noadmin #toast{bottom:24px!important}
     </div>
 
     <div id="reader"></div>
-    <div class="row" style="gap:8px">
-      <button id="btnScan" class="btn dark scanbtn" style="flex:3" onclick="toggleScan()">📷 Scanner un code-barres</button>
-      <label class="btn pri scanbtn" style="flex:1;text-align:center;padding:18px 6px">📸 Photo<input type="file" accept="image/*" capture="environment" hidden onchange="photoScan(this,'count')"></label>
-    </div>
-    <div class="small muted" style="margin-top:6px;text-align:center">Image floue ? Reculez à 20–30 cm, ou utilisez <b>📸 Photo</b>.</div>
+    <button id="btnScan" class="btn dark scanbtn" onclick="toggleScan()">📷 Scanner un code-barres</button>
+    <div class="small muted" style="margin-top:6px;text-align:center">Image floue ? Reculez à 20–30 cm, ou touchez l'image pour forcer la lecture.</div>
 
     <div class="card" style="margin-top:12px">
       <div class="row">
@@ -339,11 +336,8 @@ body.noadmin #toast{bottom:24px!important}
     <p class="small muted" style="margin:0">Scannez n'importe quel code-barres (boîte de gâteaux, livre…) : l'appli affiche ce qu'elle a lu. <b>Rien n'est enregistré.</b></p>
   </div>
   <div id="readerT" style="border-radius:var(--r);overflow:hidden;background:#000"></div>
-  <div class="row" style="gap:8px">
-    <button id="btnScanT" class="btn dark scanbtn" style="flex:3" onclick="toggleTestScan()">📷 Scanner un code-barres</button>
-    <label class="btn pri scanbtn" style="flex:1;text-align:center;padding:18px 6px">📸 Photo<input type="file" accept="image/*" capture="environment" hidden onchange="photoScan(this,'test')"></label>
-  </div>
-  <div class="small muted" style="margin-top:6px;text-align:center">Image floue ? Reculez à 20–30 cm, ou utilisez <b>📸 Photo</b> (appareil photo de l'iPhone).</div>
+  <button id="btnScanT" class="btn dark scanbtn" onclick="toggleTestScan()">📷 Scanner un code-barres</button>
+  <div class="small muted" style="margin-top:6px;text-align:center">Image floue ? Reculez à 20–30 cm, ou touchez l'image pour forcer la lecture.</div>
   <div class="row" style="margin-top:10px"><input id="tManual" type="text" inputmode="numeric" placeholder="ou tapez un code pour le vérifier" enterkeyhint="done"><button class="btn" style="flex:0" onclick="testManual()">OK</button></div>
   <div class="card" style="margin-top:12px">
     <div id="testList"></div>
@@ -535,7 +529,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 21:25';
+const APP_V='v17.11 21:35';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
