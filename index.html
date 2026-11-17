@@ -1149,13 +1149,30 @@ async function renRef(table,id,old){
 }
 async function editRacks(id){
   const d=REF.deps.find(x=>x.id===id); if(!d) return;
-  const v=prompt(`Racks du dépôt « ${d.nom} »\n\n• Tapez un nombre (ex. 12) pour créer les racks 1 à 12\n• Ou une liste séparée par des virgules (ex. A, B, C1, C2)\n• Laissez vide pour aucun rack`, (d.racks||[]).join(', '));
+  const v=prompt(`Racks du dépôt « ${d.nom} »\n\n• A:12, B:8 → A-1 à A-12 et B-1 à B-8\n• 12 → racks 1 à 12\n• Ou une liste : A-1, A-2, Mezzanine\n• Laissez vide pour aucun rack`, compactRacks(d.racks||[]));
   if(v===null) return;
-  const t=v.trim(); let racks;
-  if(/^\d+$/.test(t)) racks=Array.from({length:Math.min(+t,200)},(_,i)=>String(i+1));
-  else racks=[...new Set(t.split(/[,;\n]/).map(s=>s.trim()).filter(Boolean))];
+  const racks=parseRacks(v);
   const {error}=await sb.from('depots').update({racks}).eq('id',id); if(error) return refErr(error);
   toast(racks.length?`${racks.length} rack(s) pour ${d.nom}`:'Racks supprimés pour '+d.nom,'ok'); showRefs();
+}
+// "A:12, B:8" -> A-1..A-12, B-1..B-8 ; "12" -> 1..12 ; sinon liste libre
+function parseRacks(v){
+  const out=[];
+  String(v).split(/[,;\n]/).map(s=>s.trim()).filter(Boolean).forEach(t=>{
+    let m;
+    if((m=t.match(/^([A-Za-z]{1,3})\s*[:x×]\s*(\d{1,3})$/))){ const P=m[1].toUpperCase(); for(let i=1;i<=Math.min(+m[2],200);i++) out.push(P+'-'+i); }
+    else if((m=t.match(/^(\d{1,3})$/))){ for(let i=1;i<=Math.min(+m[1],200);i++) out.push(String(i)); }
+    else out.push(t);
+  });
+  return [...new Set(out)];
+}
+// Réaffiche A-1..A-12 sous la forme compacte "A:12" quand c'est une suite complète
+function compactRacks(r){
+  const g={}, other=[];
+  r.forEach(x=>{ const m=String(x).match(/^([A-Z]{1,3})-(\d+)$/); if(m) (g[m[1]]=g[m[1]]||[]).push(+m[2]); else other.push(x); });
+  const parts=[];
+  Object.entries(g).forEach(([P,n])=>{ n.sort((a,b)=>a-b); if(n.every((v,i)=>v===i+1)) parts.push(P+':'+n.length); else n.forEach(i=>parts.push(P+'-'+i)); });
+  return parts.concat(other).join(', ');
 }
 async function codeOp(id){
   const code=prompt('Nouveau code (4 à 6 chiffres) :','1234'); if(!code) return;
