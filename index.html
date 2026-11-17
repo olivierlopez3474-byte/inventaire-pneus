@@ -289,7 +289,22 @@ body.noadmin #toast{bottom:24px!important}
           <div class="small" id="aInfo" style="margin-top:6px"></div>
           <div class="small" id="aDup" style="margin-top:6px"></div>
         </div>
-        <button class="btn sm" onclick="closeArt()">✕</button>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <button class="btn sm" onclick="closeArt()">✕</button>
+          <button class="btn sm adminonly" id="btnEditArt" onclick="toggleEditArt()" title="Modifier l'article">✏️</button>
+        </div>
+      </div>
+      <div id="editArt" class="hidden" style="margin-top:10px;padding:10px;background:#eef3fd;border-radius:10px">
+        <div class="small"><b>✏️ Modifier l'article</b> (dans l'inventaire en cours)</div>
+        <label class="f">Désignation</label><input id="eaDes" type="text">
+        <div class="row">
+          <div><label class="f">Stock théorique</label><input id="eaStock" type="number" inputmode="numeric"></div>
+          <div><label class="f">Prix HT</label><input id="eaPrix" type="number" inputmode="decimal" step="0.01"></div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn" onclick="toggleEditArt()">Annuler</button>
+          <button class="btn dark" onclick="saveEditArt()">💾 Enregistrer</button>
+        </div>
       </div>
       <div id="newArt" class="hidden" style="margin-top:10px;padding:10px;background:#fbf3f2;border-radius:10px">
         <div class="small"><b>Créer cet article</b> (pneu hors fichier ou article de test)</div>
@@ -520,7 +535,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v17.11 21:10';
+const APP_V='v17.11 21:25';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -791,7 +806,7 @@ async function loadLogos(){
 }
 async function loadArts(){
   try{
-    S.arts = await fetchAll('articles','id,ean,reference,designation,marque,dimension,qte_theorique,a_recompter,extra',q=>q.eq('inventaire_id',S.inv));
+    S.arts = await fetchAll('articles','id,ean,reference,designation,marque,dimension,qte_theorique,prix,a_recompter,extra',q=>q.eq('inventaire_id',S.inv));
     LS.set('arts_'+S.inv,S.arts);
   }catch(e){ S.arts = LS.get('arts_'+S.inv,[]); }
   S.byEan = new Map(S.arts.map(a=>[a.ean,a]));
@@ -822,8 +837,18 @@ function renderMine(){
   $('mine').innerHTML = all.length ? all.map(c=>`<div class="it">
      <div class="q">${fmt(c.qte)}</div>
      <div class="t"><div>${esc(artLabel(c.ean))}</div><div class="muted">${esc(c.ean)} · ${esc(lieu(c.zone,c.rack))} · ${new Date(c.created_at).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}${c.recomptage?' · <b>recompt.</b>':''}${c._p?' · <span class="neg">en attente</span>':''}</div></div>
-     ${c._p?'':`<button class="btn sm red" onclick="delCount(${c.id})">✕</button>`}</div>`).join('') : '<div class="muted">Aucune saisie pour l\'instant.</div>';
+     ${c._p?'':`<button class="btn sm" onclick="editCount(${c.id})" title="Corriger la quantité">✏️</button><button class="btn sm red" onclick="delCount(${c.id})" title="Supprimer">✕</button>`}</div>`).join('') : '<div class="muted">Aucune saisie pour l\'instant.</div>';
   $('myTotal').textContent = all.length? fmt(all.reduce((s,c)=>s+Number(c.qte),0))+' pneus (30 dernières)':'';
+}
+async function editCount(id){
+  const c=S.mine.find(x=>x.id===id); if(!c) return;
+  const v=prompt(`Corriger la quantité\n${artLabel(c.ean)}\n(${lieu(c.zone,c.rack)})`, String(Number(c.qte)));
+  if(v===null) return; const q=Number(String(v).replace(',','.'));
+  if(isNaN(q)||q<0) return toast('Quantité invalide','bad');
+  const {error}=await sb.from('comptages').update({qte:q}).eq('id',id);
+  if(error) return toast(/CLOTURE/.test(error.message)?'Inventaire clôturé : modification refusée':error.message,'bad');
+  c.qte=q; const g=S.allC.find(x=>x.id===id); if(g) g.qte=q;
+  renderMine(); if(S.cur===c.ean) renderDup(c.ean); toast('Quantité corrigée : '+fmt(q),'ok');
 }
 async function delCount(id){
   if(!confirm('Supprimer cette saisie ?')) return;
@@ -1027,12 +1052,13 @@ async function testLookup(t){
   }catch(e){ t.found=null; }
   renderTest();
 }
+function tDraft(i,k,v){ if(TESTS[i]) TESTS[i][k]=v; }
 function testCreateForm(idx){
   const t=TESTS[idx]; t.form=!t.form; renderTest();
   if(t.form) setTimeout(()=>{ const el=$('tcDes'+idx); el&&el.focus(); },50);
 }
 async function testCreate(idx){
-  const t=TESTS[idx], invId=+$('tcInv'+idx).value, des=$('tcDes'+idx).value.trim(), stock=+$('tcStock'+idx).value||0;
+  const t=TESTS[idx], invId=+$('tcInv'+idx).value, des=($('tcDes'+idx).value||t.dDes||'').trim(), stock=+($('tcStock'+idx).value||t.dStock)||0;
   if(!des) return toast('Indiquez une désignation','bad');
   const inv=TINV.find(i=>i.id===invId);
   if(inv && inv.actif && !confirm(`Créer « ${des} » dans l'inventaire ACTIF « ${inv.nom} » (le vrai) ?`)) return;
@@ -1052,9 +1078,9 @@ function renderTest(){
     const defInv = (TINV.find(x=>/test/i.test(x.nom)&&!x.actif)||TINV.find(x=>!x.actif)||TINV[0]||{}).id;
     const notIn = TINV.filter(x=>!(t.found||[]).some(f=>f.inv===x.nom));
     const form = t.form ? `<div style="margin-top:8px;padding:10px;background:#fbf3f2;border-radius:10px">
-        <label class="f">Inventaire</label><select id="tcInv${i}">${notIn.map(x=>`<option value="${x.id}" ${x.id===defInv?'selected':''}>${x.actif?'⭐ ':/test/i.test(x.nom)?'🧪 ':''}${esc(x.nom)}${x.actif?' (actif — le vrai)':''}</option>`).join('')}</select>
-        <label class="f">Désignation</label><input id="tcDes${i}" type="text" placeholder="ex. Boîte de gâteaux">
-        <label class="f">Stock théorique</label><input id="tcStock${i}" type="number" inputmode="numeric" value="0">
+        <label class="f">Inventaire</label><select id="tcInv${i}" onchange="tDraft(${i},'dInv',+this.value)">${notIn.map(x=>`<option value="${x.id}" ${x.id===(t.dInv||defInv)?'selected':''}>${x.actif?'⭐ ':/test/i.test(x.nom)?'🧪 ':''}${esc(x.nom)}${x.actif?' (actif — le vrai)':''}</option>`).join('')}</select>
+        <label class="f">Désignation</label><input id="tcDes${i}" type="text" placeholder="ex. Boîte de gâteaux" value="${esc(t.dDes||'')}" oninput="tDraft(${i},'dDes',this.value)">
+        <label class="f">Stock théorique</label><input id="tcStock${i}" type="number" inputmode="numeric" value="${esc(t.dStock??'0')}" oninput="tDraft(${i},'dStock',this.value)">
         <button class="btn dark" style="width:100%;margin-top:10px" onclick="testCreate(${i})">➕ Créer l'article</button></div>` : '';
     const canCreate = t.found && notIn.length;
     return `<div style="padding:10px 0;border-bottom:1px solid var(--line);${i?'opacity:.7':''}">
@@ -1100,12 +1126,28 @@ function openArt(ean){
   $('aCode').textContent = ean;
   $('aName').textContent = a? a.designation : 'Code non référencé dans le fichier';
   $('aMeta').textContent = 'EAN '+ean + (a&&a.reference?' · réf. '+a.reference:'');
-  $('newArt').classList.toggle('hidden',!!a); if(!a){$('naDes').value='';$('naStock').value=0;$('naPrix').value='';}
+  $('newArt').classList.toggle('hidden',!!a); hide('editArt');
+  $('btnEditArt').classList.toggle('hidden',!a || !isAdmin()); if(!a){$('naDes').value='';$('naStock').value=0;$('naPrix').value='';}
   $('aInfo').innerHTML = (a&&a.a_recompter?'<span class="pill warn">À recompter</span> ':'');
   renderDup(ean);
   $('aQty').value=1; show('artCard'); $('res').innerHTML=''; $('q').value='';
   $('artCard').scrollIntoView({behavior:'smooth',block:'center'});
   setTimeout(()=>{$('aQty').focus();$('aQty').select()},250);
+}
+function toggleEditArt(){
+  const a=S.byEan.get(S.cur); if(!a) return;
+  const box=$('editArt'); const open=box.classList.contains('hidden');
+  box.classList.toggle('hidden',!open);
+  if(open){ $('eaDes').value=a.designation||''; $('eaStock').value=a.qte_theorique??0; $('eaPrix').value=a.prix??''; }
+}
+async function saveEditArt(){
+  const a=S.byEan.get(S.cur); if(!a) return;
+  const des=$('eaDes').value.trim(); if(!des) return toast('La désignation ne peut pas être vide','bad');
+  const upd={designation:des, qte_theorique:+$('eaStock').value||0, prix:$('eaPrix').value===''?null:+$('eaPrix').value};
+  const {error}=await sb.from('articles').update(upd).eq('id',a.id);
+  if(error) return toast(error.message,'bad');
+  Object.assign(a,upd); delete a._hay; LS.set('arts_'+S.inv,S.arts);
+  hide('editArt'); toast('Article modifié','ok'); openArt(a.ean); renderMine();
 }
 async function createArt(){
   const des=$('naDes').value.trim(); if(!des) return toast('Indiquez une désignation','bad');
@@ -1317,7 +1359,7 @@ function cols(){
     case 'recompt': return [sel,...base,n('theo','Stock'),n('compte1','1er comptage'),n('recompte','Recompté'),n('ecart','Écart final',ec.f),{k:'zones',l:'Compté dans',f:r=>esc(r.lieux.join(', '))},{k:'lastDep',l:'Dernier dépôt connu',f:r=>esc(r.knownTxt)||'<span class="muted">—</span>'},{k:'st',l:'État',f:r=>r.recompte!=null?'<span class="pill ok">recompté</span>':'<span class="pill warn">en attente</span>'}];
     case 'anomalies': return [...base,n('theo','Stock'),{k:'pb',l:'Problème',f:r=>[r.negTheo?'<span class="pill bad">stock négatif</span>':'',(!r.art||!r.art.ean||r.ean.startsWith('LIGNE'))?'<span class="pill warn">sans EAN</span>':''].join(' ')},n('compte','Compté')];
     case 'tout': return [sel,...base,n('theo','Stock'),n('compte1','Compté'),n('recompte','Recompté'),ec,n('prix','Prix HT',r=>eur(r.prix)),n('valEcart','Écart €',r=>eur(r.valEcart)),{k:'zones',l:'Compté dans',f:r=>esc(r.lieux.join(', '))},{k:'lastDep',l:'Dernier dépôt connu',f:r=>esc(r.knownTxt)||'<span class="muted">—</span>'}];
-    case 'saisies': return [{k:'created_at',l:'Date',f:c=>new Date(c.created_at).toLocaleString('fr-FR')},{k:'compteur',l:'Par'},{k:'zone',l:'Dépôt'},{k:'rack',l:'Rack'},{k:'ean',l:'EAN'},{k:'_des',l:'Désignation',f:c=>{const a=B.rows.find(r=>r.ean===c.ean);return esc(a?a.des:'')}},n('qte','Qté'),{k:'recomptage',l:'Type',f:c=>c.recomptage?'<span class="pill warn">recomptage</span>':'comptage'},{k:'_x',l:'',f:c=>`<button class="btn sm red" onclick="bDel(${c.id})">Supprimer</button>`}];
+    case 'saisies': return [{k:'created_at',l:'Date',f:c=>new Date(c.created_at).toLocaleString('fr-FR')},{k:'compteur',l:'Par'},{k:'zone',l:'Dépôt'},{k:'rack',l:'Rack'},{k:'ean',l:'EAN'},{k:'_des',l:'Désignation',f:c=>{const a=B.rows.find(r=>r.ean===c.ean);return esc(a?a.des:'')}},n('qte','Qté'),{k:'recomptage',l:'Type',f:c=>c.recomptage?'<span class="pill warn">recomptage</span>':'comptage'},{k:'_x',l:'',f:c=>`<button class="btn sm" onclick="bEdit(${c.id})">✏️ Corriger</button> <button class="btn sm red" onclick="bDel(${c.id})">Supprimer</button>`}];
   }
 }
 function tSel(e,on){ on?B.sel.add(e):B.sel.delete(e); renderActions(); }
@@ -1358,6 +1400,16 @@ async function setRec(on){
   const {error}=await sb.from('articles').update({a_recompter:on}).in('id',ids);
   if(error) return toast(error.message,'bad');
   toast(on?`${B.sel.size} article(s) envoyés en recomptage`:'Retiré du recomptage','ok'); B.sel.clear(); refreshBureau();
+}
+async function bEdit(id){
+  const c=B.cpt.find(x=>x.id===id); if(!c) return;
+  const r=B.rows.find(x=>x.ean===c.ean);
+  const v=prompt(`Corriger la quantité\n${r?r.des:c.ean}\n${lieu(c.zone,c.rack)} — par ${c.compteur}`, String(Number(c.qte)));
+  if(v===null) return; const q=Number(String(v).replace(',','.'));
+  if(isNaN(q)||q<0) return toast('Quantité invalide','bad');
+  const {error}=await sb.from('comptages').update({qte:q}).eq('id',id);
+  if(error) return toast(/CLOTURE/.test(error.message)?'Inventaire clôturé : modification refusée':error.message,'bad');
+  toast('Quantité corrigée','ok'); refreshBureau();
 }
 async function bDel(id){
   if(!confirm('Supprimer cette saisie ?'))return;
