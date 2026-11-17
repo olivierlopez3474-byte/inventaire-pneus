@@ -491,7 +491,6 @@ tr.trhors td{background:#fff0e3}
         <span id="anaActions"></span>
         <span style="flex:1"></span>
         <button class="btn sm" onclick="refreshBureau()">↻ Actualiser</button>
-        <button class="btn sm" onclick="showLabels()">🏷 Codes-barres de test</button>
         <button class="btn sm dark" onclick="exportXlsx()">⬇ Export Excel complet</button>
       </div>
       <div class="tw" id="anaTable"></div>
@@ -578,7 +577,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v18.11 02:05';
+const APP_V='v18.11 02:10';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
