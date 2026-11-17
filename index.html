@@ -99,6 +99,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 .prev{overflow:auto;max-height:240px;font-size:12px}
 .prev td,.prev th{white-space:nowrap;padding:4px 8px}
 .help{background:#fffaf0;border:1px solid #f3e2b6;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:10px}
+.dupw{background:#fdf0d5;border:1px solid #f0cf86;color:#7a4a00;border-radius:10px;padding:10px 12px;margin-bottom:6px}
 .brandbig{margin-bottom:8px;min-height:0}
 .brandbig img{max-height:48px;max-width:180px;object-fit:contain;display:block}
 .brandsm img{height:20px;max-width:70px;object-fit:contain;vertical-align:middle}
@@ -192,7 +193,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
         <label class="switch"><input type="checkbox" id="fast"> Mode rapide (1 scan = 1 pneu)</label>
       </div>
       <div class="row" style="margin-top:6px">
-        <label class="switch"><input type="checkbox" id="recMode" onchange="renderRecList()"> Mode recomptage</label>
+        <label class="switch"><input type="checkbox" id="recMode" onchange="renderRecList();if(S.cur)renderDup(S.cur)"> Mode recomptage</label>
       </div>
     </div>
 
@@ -226,6 +227,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
           <h3 id="aName"></h3>
           <div class="small muted" id="aMeta"></div>
           <div class="small" id="aInfo" style="margin-top:6px"></div>
+          <div class="small" id="aDup" style="margin-top:6px"></div>
         </div>
         <button class="btn sm" onclick="closeArt()">✕</button>
       </div>
@@ -358,7 +360,13 @@ function keyEan(v){ // clé de rapprochement EAN
 }
 let toastT;
 function toast(msg,cls=''){const t=$('toast');t.textContent=msg;t.className='on '+cls;clearTimeout(toastT);toastT=setTimeout(()=>t.className='',2200)}
-function beep(ok=true){try{const c=new (window.AudioContext||window.webkitAudioContext)();const o=c.createOscillator();const g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=ok?1200:300;g.gain.value=.15;o.start();setTimeout(()=>{o.stop();c.close()},ok?90:300)}catch(e){} if(navigator.vibrate) navigator.vibrate(ok?60:[80,60,80]);}
+function beep(ok=true){ // true = OK, false = inconnu, 'warn' = doublon possible
+  const tones = ok==='warn' ? [[700,120],[700,120],[700,120]] : ok ? [[1200,90]] : [[300,300]];
+  try{const c=new (window.AudioContext||window.webkitAudioContext)();let t=c.currentTime;
+    tones.forEach(([f,d])=>{const o=c.createOscillator();const g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=f;g.gain.value=.15;o.start(t);o.stop(t+d/1000);t+=d/1000+.08;});
+    setTimeout(()=>c.close(),1500);}catch(e){}
+  if(navigator.vibrate) navigator.vibrate(ok==='warn'?[150,80,150,80,150]:ok?60:[80,60,80]);
+}
 async function fetchAll(table, cols, filt){
   let out=[],from=0,step=1000;
   for(;;){
@@ -393,7 +401,7 @@ function go(v){
 }
 
 /* ================== COMPTAGE ================== */
-let S = {inv:null, who:'', zone:'', arts:[], byEan:new Map(), cur:null, scanner:null, scanning:false, lastCode:'', lastT:0, mine:[]};
+let S = {inv:null, who:'', zone:'', arts:[], byEan:new Map(), cur:null, scanner:null, scanning:false, lastCode:'', lastT:0, mine:[], allC:[]};
 let Q = LS.get('queue',[]); // file d'attente hors-ligne
 
 function netState(){
@@ -429,6 +437,51 @@ async function startCount(silent){
   hide('setup'); show('counting');
   loadLogos();
   await loadArts(); await loadMine(); subscribeArts();
+  loadAllCounts();
+}
+
+/* ---- contrôle des doublons en direct ---- */
+let cntSub;
+async function loadAllCounts(){
+  try{
+    S.allC = await fetchAll('comptages','id,ean,qte,zone,compteur,recomptage,created_at',q=>q.eq('inventaire_id',S.inv));
+    LS.set('cpt_'+S.inv,S.allC);
+  }catch(e){ S.allC = LS.get('cpt_'+S.inv,[]); }
+  if(cntSub) sb.removeChannel(cntSub);
+  cntSub = sb.channel('cnt'+S.inv).on('postgres_changes',{event:'*',schema:'public',table:'comptages',filter:'inventaire_id=eq.'+S.inv},p=>{
+    if(p.eventType==='INSERT'){ if(!S.allC.some(c=>c.id===p.new.id)) S.allC.push(p.new); }
+    else if(p.eventType==='DELETE'){ S.allC=S.allC.filter(c=>c.id!==p.old.id); }
+    else if(p.eventType==='UPDATE'){ S.allC=S.allC.map(c=>c.id===p.new.id?p.new:c); }
+    if(S.cur) renderDup(S.cur);
+  }).subscribe();
+}
+function dupInfo(ean){
+  const rec=$('recMode').checked;
+  const sent=S.allC.filter(c=>c.ean===ean && !!c.recomptage===rec);
+  const pend=Q.filter(c=>c.inventaire_id===S.inv && c.ean===ean && !!c.recomptage===rec);
+  const all=sent.concat(pend);
+  const total=all.reduce((s,c)=>s+Number(c.qte),0);
+  const mineHere=all.filter(c=>c.compteur===S.who && c.zone===S.zone);
+  const groups={};
+  all.filter(c=>!(c.compteur===S.who && c.zone===S.zone)).forEach(c=>{
+    const k=(c.compteur||'?')+'|'+(c.zone||'?');
+    const g=groups[k]||(groups[k]={who:c.compteur||'?',zone:c.zone||'?',qte:0,t:c.created_at});
+    g.qte+=Number(c.qte); if(c.created_at>g.t) g.t=c.created_at;
+  });
+  const lastMine=mineHere.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];
+  const a=S.byEan.get(ean);
+  return {rec,total,mineQ:mineHere.reduce((s,c)=>s+Number(c.qte),0),others:Object.values(groups),lastMine,theo:a?Number(a.qte_theorique)||0:null};
+}
+const hhmm=t=>new Date(t).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+function renderDup(ean){
+  const d=dupInfo(ean); const out=[];
+  if(d.others.length){
+    out.push(`<div class="dupw"><b>⚠ Déjà compté ${d.rec?'(recomptage) ':''}ailleurs :</b><br>${d.others.map(g=>`${fmt(g.qte)} par ${esc(g.who)} — ${esc(g.zone)} à ${hhmm(g.t)}`).join('<br>')}<div class="small" style="margin-top:4px">Si c'est la même pile, ne la recomptez pas. Si le stock est réparti dans plusieurs zones, c'est normal.</div></div>`);
+  }
+  if(d.mineQ) out.push(`<span class="pill blue">Déjà saisi par vous ici : ${fmt(d.mineQ)}</span> `);
+  if(d.theo!=null && d.total>0) out.push(`<span class="pill ${d.total>d.theo?'bad':d.total===d.theo?'ok':''}">Compté au total : ${fmt(d.total)} / stock ${fmt(d.theo)}</span>`);
+  $('aDup').innerHTML=out.join('');
+  return d;
 }
 
 /* ---- marques & logos ---- */
@@ -493,7 +546,7 @@ async function delCount(id){
   if(!confirm('Supprimer cette saisie ?')) return;
   const {error}=await sb.from('comptages').delete().eq('id',id);
   if(error) return toast(error.message,'bad');
-  S.mine=S.mine.filter(c=>c.id!==id); renderMine(); toast('Saisie supprimée');
+  S.mine=S.mine.filter(c=>c.id!==id); S.allC=S.allC.filter(c=>c.id!==id); renderMine(); toast('Saisie supprimée');
 }
 
 /* recherche manuelle */
@@ -531,12 +584,21 @@ function onScan(txt){
   if(k===S.lastCode && now-S.lastT<1800) return;
   S.lastCode=k; S.lastT=now;
   const a=S.byEan.get(k);
+  const d=dupInfo(k);
   if($('fast').checked){
-    beep(!!a);
     addCount(k,1);
-    toast((a?a.designation:'Code inconnu '+k)+'  +1', a?'ok':'bad');
+    if(d.others.length){
+      beep('warn');
+      toast(`⚠ ${a?a.designation:k} : déjà compté par ${d.others.map(g=>g.who+' ('+g.zone+')').join(', ')}  +1 ajouté`,'bad');
+    } else if(a && d.total+1>d.theo && d.theo>=0){
+      beep('warn');
+      toast(`${a.designation} +1 — ${fmt(d.total+1)} comptés pour un stock de ${fmt(d.theo)}`,'bad');
+    } else {
+      beep(!!a);
+      toast((a?a.designation:'Code inconnu '+k)+'  +1', a?'ok':'bad');
+    }
   } else {
-    beep(!!a);
+    beep(!a?false:d.others.length?'warn':true);
     if(S.scanner && S.scanning){ try{S.scanner.pause(true)}catch(e){} }
     openArt(k);
   }
@@ -547,9 +609,9 @@ function openArt(ean){
   $('aLogo').innerHTML = brandHtml(brandOf(a));
   $('aName').textContent = a? a.designation : 'Code non référencé dans le fichier';
   $('aMeta').textContent = 'EAN '+ean + (a&&a.reference?' · réf. '+a.reference:'');
-  const already = S.mine.concat(Q).filter(c=>c.ean===ean&&c.inventaire_id===S.inv).reduce((s,c)=>s+Number(c.qte),0);
   $('newArt').classList.toggle('hidden',!!a); if(!a){$('naDes').value='';$('naStock').value=0;$('naPrix').value='';}
-  $('aInfo').innerHTML = (a&&a.a_recompter?'<span class="pill warn">À recompter</span> ':'') + (already?`<span class="pill blue">Déjà saisi par vous : ${fmt(already)}</span>`:'');
+  $('aInfo').innerHTML = (a&&a.a_recompter?'<span class="pill warn">À recompter</span> ':'');
+  renderDup(ean);
   $('aQty').value=1; show('artCard'); $('res').innerHTML=''; $('q').value='';
   $('artCard').scrollIntoView({behavior:'smooth',block:'center'});
   setTimeout(()=>{$('aQty').focus();$('aQty').select()},250);
@@ -574,6 +636,11 @@ function bump(d){ const i=$('aQty'); i.value=Math.max(0,(+i.value||0)+d); }
 $('aQty').addEventListener('keydown',e=>{if(e.key==='Enter')saveCount()});
 function saveCount(){
   const q=+$('aQty').value; if(isNaN(q)||q<0) return toast('Quantité invalide','bad');
+  const d=dupInfo(S.cur);
+  if(d.lastMine){
+    const s=Math.round((Date.now()-new Date(d.lastMine.created_at))/1000);
+    if(s<60 && !confirm(`Vous avez déjà saisi ${fmt(d.lastMine.qte)} pour cet article il y a ${s} s.\n\nAjouter encore ${fmt(q)} (total ${fmt(d.mineQ+q)}) ?`)) return;
+  }
   addCount(S.cur,q); toast(`${fmt(q)} × ${artLabel(S.cur)}`,'ok');
   hide('artCard'); S.cur=null; resumeScan();
 }
@@ -590,6 +657,7 @@ async function flushQueue(){
     const {data,error}=await sb.from('comptages').insert(batch).select();
     if(!error){
       Q=Q.slice(batch.length); LS.set('queue',Q);
+      if(S.inv) data.forEach(c=>{ if(c.inventaire_id===S.inv && !S.allC.some(x=>x.id===c.id)) S.allC.push(c); });
       if(S.inv) S.mine = data.filter(c=>c.compteur===S.who&&c.inventaire_id===S.inv).reverse().concat(S.mine).slice(0,30);
     } else if(/inventaire|foreign/i.test(error.message)) { toast('Erreur: '+error.message,'bad'); }
   }catch(e){}
