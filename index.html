@@ -584,7 +584,7 @@ async function doLogin(){
 }
 async function logout(){ await stopScan(); LS.set('role',null); await sb.auth.signOut(); location.reload(); }
 
-const APP_V='v18.11 01:15';
+const APP_V='v18.11 01:20';
 const VIEWS={saisie:['vSaisie','Comptage'],find:['vFind','Où est ce pneu ?'],test:['vTest','Test lecteur'],bureau:['vBureau','Administration']};
 const PANELS=['importBox','refBox','brandBox','labels'];
 // Bande « inventaire en cours » visible sur toutes les pages
@@ -1621,7 +1621,7 @@ function renderKpis(){
    <div class="kpi"><div class="l">Pneus</div><div class="v">${fmt(cpt)} <span class="small muted">/ ${fmt(theo)}</span></div><div class="small muted">comptés / stock fichier</div></div>
    <div class="kpi"><div class="l">Articles en écart</div><div class="v ${nE?'neg':''}">${fmt(nE)}</div><div class="small muted">${fmt(sets.nonref().length)} code(s) non référencé(s)</div></div>
    <div class="kpi"><div class="l">Écart valorisé (HT)</div><div class="v ${valE<0?'neg':valE>0?'pos':''}">${eur(valE)}</div><div class="small muted">sur articles comptés · stock ${eur(valT)}</div></div>
-   <div class="kpi"><div class="l">Saisies</div><div class="v">${fmt(B.cpt.length)}</div><div class="small muted">${Object.entries(who).map(([k,v])=>esc(k)+' : '+fmt(v)).join(' · ')||'—'}</div></div>`;
+   <div class="kpi"><div class="l">Saisies</div><div class="v">${fmt(B.cpt.length)}</div><div class="small muted">${Object.entries(who).map(([k,v])=>esc(k)+' : '+fmt(v)+' pneus').join(' · ')||'—'}</div></div>`;
 }
 function renderTabs(){
   $('subtabs').innerHTML = TABS.map(([k,l])=>`<button class="${B.tab===k?'on':''}" onclick="B.tab='${k}';B.sort=null;B.sel.clear();renderTabs();renderAna()">${l}<span class="n">${fmt(sets[k]().filter(r=>inDep(r,$('fDep').value)).length)}</span></button>`).join('');
@@ -1641,7 +1641,7 @@ function cols(){
     case 'anomalies': return [...base,n('theo','Stock'),{k:'pb',l:'Problème',f:r=>[r.negTheo?'<span class="pill bad">stock négatif</span>':'',(!r.art||!r.art.ean||r.ean.startsWith('LIGNE'))?'<span class="pill warn">sans EAN</span>':''].join(' ')},n('compte','Compté')];
     case 'tout': return [sel,...base,n('theo','Stock'),n('compte1','Compté'),n('recompte','Recompté'),ec,n('prix','Prix HT',r=>eur(r.prix)),n('valEcart','Écart €',r=>eur(r.valEcart)),{k:'zones',l:'Compté dans',f:r=>esc(r.lieux.join(', '))},{k:'lastDep',l:'Dernier dépôt connu',f:r=>esc(r.knownTxt)||'<span class="muted">—</span>'}];
     case 'horsf': return [...base,{k:'marque',l:'Marque',f:r=>esc(r.art?.marque||'')},n('compte','Compté'),{k:'zones',l:'Compté dans',f:r=>esc(r.lieux.join(', '))},{k:'compteurs',l:'Par',f:r=>esc(r.compteurs.join(', '))},{k:'h',l:'Heure',f:r=>r.c.length?new Date(r.c.map(c=>c.created_at).sort().pop()).toLocaleString('fr-FR'):''}];
-    case 'saisies': return [{k:'created_at',l:'Date',f:c=>new Date(c.created_at).toLocaleString('fr-FR')},{k:'compteur',l:'Par'},{k:'zone',l:'Dépôt'},{k:'rack',l:'Rack'},{k:'ean',l:'EAN'},{k:'_des',l:'Désignation',f:c=>{const a=B.rows.find(r=>r.ean===c.ean);return esc(a?a.des:'')}},n('qte','Qté'),{k:'recomptage',l:'Type',f:c=>(c.recomptage?'<span class="pill warn">recomptage</span>':'comptage')+(c.source==='manuel'?' <span class="pill">✋ manuel</span>':' 📷')},{k:'_x',l:'',f:c=>`<button class="btn sm" onclick="bEdit(${c.id})">✏️ Corriger</button> <button class="btn sm red" onclick="bDel(${c.id})">Supprimer</button>`}];
+    case 'saisies': return [{k:'created_at',l:'Date',f:c=>new Date(c.created_at).toLocaleString('fr-FR')},{k:'compteur',l:'Par'},{k:'zone',l:'Dépôt'},{k:'rack',l:'Rack'},{k:'ean',l:'EAN'},{k:'_des',l:'Désignation',f:c=>{const a=B.rows.find(r=>r.ean===c.ean);return esc(a?a.des:'')}},n('qte','Qté'),{k:'recomptage',l:'Type',f:c=>(c.recomptage?'<span class="pill warn">recomptage</span>':'comptage')+(c.source==='manuel'?' <span class="pill">✋ manuel</span>':' 📷')},{k:'_x',l:'',f:c=>`<div style="display:flex;gap:6px;white-space:nowrap"><button class="btn sm" onclick="bEdit(${c.id})" title="Corriger la quantité">✏️</button><button class="btn sm red" onclick="bDel(${c.id})" title="Supprimer la saisie">✕</button></div>`}];
   }
 }
 function tSel(e,on){ on?B.sel.add(e):B.sel.delete(e); renderActions(); }
